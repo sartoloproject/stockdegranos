@@ -1,0 +1,19 @@
+# Cloudflare Pages — Headers de seguridad y caché
+
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  X-XSS-Protection: 1; mode=block
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=self, microphone=(), geolocation=()
+
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Service-Worker-Allowed: /
+
+/manifest.json
+  Content-Type: application/manifest+json
+  Cache-Control: public, max-age=3600
+
+/icons/*
+  Cache-Control: public, max-age=31536000, immutable
