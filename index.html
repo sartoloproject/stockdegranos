@@ -5265,14 +5265,19 @@ async function procesarPDFGlobal(input, tipo) {
   statusEl.innerHTML = `<div class="alert" style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 14px;font-size:12px">⏳ Leyendo PDF...</div>`;
 
   try {
-    // Extraer texto del PDF
+    // Extraer texto del PDF — agrupado por línea (coordenada Y) para mantener
+    // el orden visual real de etiquetas y valores, igual que procesarPDFCertificacion.
+    // Sin esto, pdfjs puede devolver los items en un orden interno distinto al visual,
+    // separando labels como "Peso Bruto:" de su valor numérico y rompiendo el parseo.
     const arrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     let texto = '';
     for (let i = 1; i <= pdf.numPages; i++) {
       const pg = await pdf.getPage(i);
       const tc = await pg.getTextContent();
-      texto += tc.items.map(it => it.str).join(' ') + '\n';
+      const lm = {};
+      tc.items.forEach(it => { const y = Math.round(it.transform[5]); if (!lm[y]) lm[y] = []; lm[y].push(it.str); });
+      Object.keys(lm).sort((a, b) => b - a).forEach(y => { texto += lm[y].join(' ') + '\n'; });
     }
 
     // Parsear según tipo
