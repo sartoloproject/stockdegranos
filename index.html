@@ -1203,7 +1203,7 @@ tr:hover td{background:rgba(0,0,0,0.016)}
                   <div class="form-group"><label>Destino</label><input type="text" id="egr-destino" placeholder="Ej: LDC ARGENTINA S.A."></div>
                 </div>
                 <div id="egr-alert"></div>
-                <button class="btn btn-red" onclick="registrarEgreso()">Registrar egreso</button>
+                <button type="button" class="btn btn-red" onclick="registrarEgreso()">Registrar egreso</button>
               </div>
             </div>
 
@@ -3197,12 +3197,26 @@ function _camposResumenHTML(b) {
 
 // ─── BÚSQUEDA DE BOLSÓN PARA EGRESO ─────────────────────────────
 // ─── BÚSQUEDA DE BOLSÓN PARA EGRESO (cosecha → ubicación → N°) ───
+// FIX: Helper seguro de stock — nunca retorna NaN aunque ingresado/egresado sean undefined
+function _stockSeguro(b) {
+  const ing = typeof b.ingresado === 'number' && !isNaN(b.ingresado)
+    ? b.ingresado
+    : movimientos.filter(m => m.bolsonId === b.id && m.tipo === 'ingreso').reduce((s,m) => s + (m.kg||0), 0);
+  const egr = typeof b.egresado === 'number' && !isNaN(b.egresado)
+    ? b.egresado
+    : movimientos.filter(m => (m.bolsonId === b.id || (m.bolsonIds||[]).some(x => x.id === b.id)) && m.tipo === 'egreso').reduce((s,m) => {
+        if (m.bolsonIds) { const x = m.bolsonIds.find(x => x.id === b.id); return s + (x ? x.kg : 0); }
+        return s + (m.kg||0);
+      }, 0);
+  return ing - egr;
+}
+
 function poblarCosechasEgreso() {
   const sel = document.getElementById('egr-busq-cosecha');
   if (!sel) return;
   const cosechas = [...new Set(
     bolsones
-      .filter(b => (b.ingresado - b.egresado) > 0 && b.cosecha)
+      .filter(b => _stockSeguro(b) > 0 && b.cosecha)
       .map(b => b.cosecha)
   )].sort().reverse();
   sel.innerHTML = '<option value="">— Seleccionar cosecha —</option>' +
@@ -3227,7 +3241,7 @@ function actualizarUbicacionesEgr() {
 
   const ubicaciones = [...new Set(
     bolsones
-      .filter(b => b.cosecha === cosecha && (b.ingresado - b.egresado) > 0)
+      .filter(b => b.cosecha === cosecha && _stockSeguro(b) > 0)
       .map(b => b.ubicacion || b.campo || '—')
   )].sort();
 
@@ -3258,7 +3272,7 @@ function actualizarOpcionesBolsonEgr() {
   const disponibles = bolsones.filter(b =>
     b.cosecha === cosecha &&
     (b.ubicacion || b.campo || '—') === ubicacion &&
-    (b.ingresado - b.egresado) > 0 &&
+    _stockSeguro(b) > 0 &&
     b.numCampaña
   ).sort((a, b) => a.numCampaña - b.numCampaña);
 
@@ -3271,7 +3285,7 @@ function actualizarOpcionesBolsonEgr() {
   numSel.disabled  = false;
   numSel.innerHTML = '<option value="">— N° de bolsón —</option>' +
     disponibles.map(b => {
-      const stock  = b.ingresado - b.egresado;
+      const stock  = _stockSeguro(b);
       const campoD = _campoDisplay(b);
       return `<option value="${b.id}">B${b.numCampaña} · ${b.grano} · ${campoD} · ${stock.toLocaleString('es-AR')} kg</option>`;
     }).join('');
@@ -3285,9 +3299,10 @@ function mostrarBolsonEgresoSeleccionado() {
   const b = bolsones.find(x => x.id === bolsonId);
   if (!b) { cont.innerHTML = ''; return; }
 
-  const stock  = b.ingresado - b.egresado;
+  const stock  = _stockSeguro(b);
   const tc     = 'tag-' + b.grano.toLowerCase().replace('í','i').replace('ó','o');
-  const pct    = b.ingresado > 0 ? Math.round((stock / b.ingresado) * 100) : 0;
+  const ingNum = typeof b.ingresado === 'number' && !isNaN(b.ingresado) ? b.ingresado : stock;
+  const pct    = ingNum > 0 ? Math.round((stock / ingNum) * 100) : 0;
   const yaSel  = !!_egrBolsones.find(x => x.id === b.id);
   const campoD = _campoDisplay(b);
 
@@ -3300,7 +3315,7 @@ function mostrarBolsonEgresoSeleccionado() {
     <div class="bolson-right" style="align-items:flex-end">
       <div class="bolson-kg">${stock.toLocaleString('es-AR')} kg</div>
       <div class="bolson-pct">${pct}% disp.</div>
-      <button class="bolson-add-btn${yaSel ? ' ya-sel' : ''}"
+      <button type="button" class="bolson-add-btn${yaSel ? ' ya-sel' : ''}"
         style="margin-top:6px"
         onclick="${yaSel ? '' : 'agregarBolsonEgreso(' + b.id + ')'}"
         ${yaSel ? 'disabled' : ''}>
@@ -3311,6 +3326,7 @@ function mostrarBolsonEgresoSeleccionado() {
 }
 
 function agregarBolsonEgreso(bolsonId) {
+  bolsonId = Number(bolsonId); // FIX: asegurar que el id es número, no string del onclick
   if (_egrBolsones.find(x => x.id === bolsonId)) return;
   _egrBolsones.push({ id: bolsonId, kg: 0 });
   renderEgrBolsonesSeleccionados();
@@ -3349,7 +3365,7 @@ function renderEgrBolsonesSeleccionados() {
   list.innerHTML = _egrBolsones.map(item => {
     const b = bolsones.find(x => x.id === item.id);
     if (!b) return '';
-    const stock  = b.ingresado - b.egresado;
+    const stock  = _stockSeguro(b);
     const tc     = 'tag-' + b.grano.toLowerCase().replace('í','i').replace('ó','o');
     const campoD = _campoDisplay(b);
     return `<div class="bolson-sel-item">
@@ -4109,6 +4125,11 @@ function registrarEgreso() {
   const destino  = (document.getElementById('egr-destino')  || {}).value || '';
   const alertEl  = document.getElementById('egr-alert');
 
+  // FIX: normalizar IDs a número por si llegaron como string desde el template HTML
+  _egrBolsones = _egrBolsones.map(x => ({ ...x, id: Number(x.id) }));
+
+  console.log('[Egreso] _egrBolsones al registrar:', JSON.stringify(_egrBolsones));
+
   if (!_egrBolsones.length) {
     alertEl.innerHTML = '<div class="alert alert-danger">Agregá al menos un bolsón de origen.</div>'; return;
   }
@@ -4577,12 +4598,26 @@ function guardarEstado() {
     }));
     if (estadoFB.cisterna && estadoFB.cisterna.movimientos) {
       estadoFB.cisterna.movimientos = estadoFB.cisterna.movimientos.map(m => ({
-        ...m, foto: (m.foto && m.foto.startsWith('data:')) ? null : m.foto
+        ...m, foto: (m.foto && m.foto.startsWith('data:')) ? null : (m.foto ?? null)
       }));
     }
 
+    // FIX: Firebase no acepta undefined — reemplazar todos los undefined por null recursivamente
+    const _sanitizeForFirebase = (obj) => {
+      if (obj === undefined) return null;
+      if (obj === null || typeof obj !== 'object') return obj;
+      if (Array.isArray(obj)) return obj.map(_sanitizeForFirebase);
+      const out = {};
+      for (const k of Object.keys(obj)) {
+        const v = _sanitizeForFirebase(obj[k]);
+        if (v !== undefined) out[k] = v;
+      }
+      return out;
+    };
+    const estadoFBClean = _sanitizeForFirebase(estadoFB);
+
     console.log('💾 Guardando en Firebase…');
-    window._fbSet(_fbKeyActual(), estadoFB)
+    window._fbSet(_fbKeyActual(), estadoFBClean)
       .then(() => {
         console.log('✅ Firebase OK');
         mostrarToast('☁️ Guardado en la nube');
@@ -4621,6 +4656,24 @@ function cargarEstado() {
     if (d.cisterna)    cisterna    = d.cisterna;
     if (d.camposData)  { CAMPOS_DATA = d.camposData; CAMPOS = _rebuildCampos(); }
     if (d.nextBolsonPorCampania) nextBolsonPorCampania = d.nextBolsonPorCampania;
+    // FIX: Garantizar que ingresado/egresado sean números en todos los bolsones.
+    // Si vienen undefined desde Firebase (bolsones creados con versiones anteriores),
+    // los recalculamos desde los movimientos para que los filtros de egreso funcionen.
+    bolsones.forEach(b => {
+      if (typeof b.ingresado !== 'number' || isNaN(b.ingresado)) {
+        b.ingresado = movimientos
+          .filter(m => m.bolsonId === b.id && m.tipo === 'ingreso')
+          .reduce((s, m) => s + (m.kg || 0), 0);
+      }
+      if (typeof b.egresado !== 'number' || isNaN(b.egresado)) {
+        b.egresado = movimientos
+          .filter(m => (m.bolsonId === b.id || (m.bolsonIds||[]).some(x => x.id === b.id)) && m.tipo === 'egreso')
+          .reduce((s, m) => {
+            if (m.bolsonIds) { const x = m.bolsonIds.find(x => x.id === b.id); return s + (x ? x.kg : 0); }
+            return s + (m.kg || 0);
+          }, 0);
+      }
+    });
     deduplicarAcopios();
   }
 
@@ -4689,7 +4742,7 @@ function cargarEstado() {
       if (window._firebaseReady) {
         clearInterval(esperar);
         cargarEstado();
-      } else if (intentos > 30) {
+      } else if (intentos > 60) {  // FIX: era 30 (3s), ahora 60 (6s) para conexiones lentas
         clearInterval(esperar);
         _cargarDesdeLocal();
         mostrarToast('⚠️ Firebase no disponible — datos locales');
@@ -5068,32 +5121,43 @@ function renderDetalleAcopio(clave) {
     const pagoCond    = sum('pago_condiciones');
     const totalCom    = sum('comision');
 
-    // Desglose por liquidación individual
-    const desgloseLiqs = liqMovs.map((m, i) => {
-      const fd = m.fecha ? m.fecha.split('-').reverse().join('/') : '—';
-      const comLabel = m.comision_pct ? `Comisión (${m.comision_pct}%)` : 'Comisión';
-      return `<div style="background:var(--bg2);border-radius:var(--radius);padding:10px 14px;margin-bottom:8px;border:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Liquidación ${i+1} · COE ${m.coe||'—'} · ${fd}</div>
-          <div style="font-size:11px;color:var(--text3)">${(m.kg||0).toLocaleString('es-AR')} kg · $${(m.precio_kg||0).toLocaleString('es-AR',{minimumFractionDigits:2})}/kg</div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px">
-          <span style="color:var(--text3)">Total operación c/IVA</span><span style="text-align:right;font-weight:600">$${(m.total_operacion||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-          <span style="color:var(--text3);padding-left:10px">↳ ${comLabel}</span><span style="text-align:right;color:var(--red)">-$${(m.comision||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-          <span style="color:var(--text3)">Total deducciones</span><span style="text-align:right;color:var(--red)">-$${(m.deducciones||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-          <span style="color:var(--text3)">Retenciones AFIP</span><span style="text-align:right;color:var(--red)">-$${(m.retenciones_afip||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-          <span style="color:var(--text3)">IVA RG 4310/2018</span><span style="text-align:right;color:var(--amber)">-$${(m.iva_rg4310||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-          <span style="font-weight:600;color:var(--green)">💰 Neto a cobrar</span><span style="text-align:right;font-weight:700;color:var(--green)">$${(m.neto_pagar||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-          <span style="color:var(--text3)">Pago según condiciones</span><span style="text-align:right">$${(m.pago_condiciones||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
-        </div>
-      </div>`;
-    }).join('');
+    // Tabla compacta — una fila por liquidación
+    const desgloseLiqs = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:${liqMovs.length > 1 ? 14 : 0}px">
+        <thead>
+          <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+            <th style="padding:6px 10px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">#</th>
+            <th style="padding:6px 10px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">COE · Fecha</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">kg</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">$/kg</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Total op.</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Deduc.</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--green);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Neto</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${liqMovs.map((m, i) => {
+            const fd = m.fecha ? m.fecha.split('-').reverse().join('/') : '—';
+            const even = i % 2 === 1;
+            return `<tr style="border-bottom:1px solid var(--bg3);${even ? 'background:var(--bg2)' : ''}">
+              <td style="padding:5px 10px;color:var(--text3)">${i+1}</td>
+              <td style="padding:5px 10px;font-family:var(--mono);font-size:11px">${m.coe||'—'} · ${fd}</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono)">${(m.kg||0).toLocaleString('es-AR')}</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono)">$${(m.precio_kg||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono)">$${(m.total_operacion||0).toLocaleString('es-AR',{minimumFractionDigits:0})}</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono);color:var(--red)">-$${(m.deducciones||0).toLocaleString('es-AR',{minimumFractionDigits:0})}</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">$${(m.neto_pagar||0).toLocaleString('es-AR',{minimumFractionDigits:0})}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
 
     finEl.style.display = 'block';
     document.getElementById('det-financiero-content').innerHTML = `
-      ${liqMovs.length > 1 ? desgloseLiqs : ''}
-      <div style="margin-top:${liqMovs.length > 1 ? 12 : 0}px;${liqMovs.length > 1 ? 'border-top:2px solid var(--border);padding-top:12px' : ''}">
-        ${liqMovs.length > 1 ? `<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">TOTAL ACUMULADO (${liqMovs.length} liquidaciones)</div>` : ''}
+      ${desgloseLiqs}
+      ${liqMovs.length > 1 ? `
+      <div style="border-top:2px solid var(--border);padding-top:12px">
+        <div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">TOTAL ACUMULADO (${liqMovs.length} liquidaciones)</div>
         ${row('Total operación c/IVA', $f(totalOp))}
         ${totalCom ? row('↳ Comisión pagada', '-' + $f(totalCom), ';color:var(--red)', true) : ''}
         ${row('Deducciones totales', '-' + $f(deducciones), ';color:var(--red)')}
@@ -5104,7 +5168,20 @@ function renderDetalleAcopio(clave) {
           <span style="font-weight:700;color:var(--green);font-size:15px">$${neto.toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
         </div>
         ${row('Pago según condiciones', $f(pagoCond))}
-      </div>`;
+      </div>` : `
+      <div>
+        ${row('Total operación c/IVA', $f(totalOp))}
+        ${totalCom ? row('↳ Comisión pagada', '-' + $f(totalCom), ';color:var(--red)', true) : ''}
+        ${row('Deducciones totales', '-' + $f(deducciones), ';color:var(--red)')}
+        ${row('Retenciones AFIP', '-' + $f(retAfip), ';color:var(--red)')}
+        ${row('IVA RG 4310/2018', '-' + $f(ivaRG), ';color:var(--amber)')}
+        <div class="fin-row fin-row-total" style="margin-top:8px">
+          <span style="font-weight:600;color:var(--green)">💰 Neto a cobrar</span>
+          <span style="font-weight:700;color:var(--green);font-size:15px">$${neto.toLocaleString('es-AR',{minimumFractionDigits:2})}</span>
+        </div>
+        ${row('Pago según condiciones', $f(pagoCond))}
+      </div>`
+      }`;
   } else { finEl.style.display = 'none'; }
 
   // ── Resumen financiero de CERTIFICACIONES ────────────────────────
@@ -5116,39 +5193,34 @@ function renderDetalleAcopio(clave) {
     const tblRow = (label, val, bold=false, color='') =>
       `<tr><td style="padding:4px 8px;color:var(--text3);font-size:12px;border-bottom:1px solid var(--bg3)">${label}</td><td style="padding:4px 8px;text-align:right;font-size:12px;font-weight:${bold?'700':'400'};color:${color||'var(--text)'};border-bottom:1px solid var(--bg3)">${val}</td></tr>`;
 
-    const desglosesCert = certMovs.map((m, i) => {
-      const fd = m.fecha ? m.fecha.split('-').reverse().join('/') : '—';
-      const cptoNG = Math.max(0, (m.total_servicios||0) - (m.gastos_generales||0) - (m.importe_iva||0));
-      return `
-      <div style="background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);margin-bottom:10px;overflow:hidden">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--bg3)">
-          <span style="font-size:12px;font-weight:700;color:var(--text)">Certificación ${i+1} · COE ${m.coe||'—'} · ${fd}</span>
-          <span style="font-size:11px;color:var(--text3)">${m.grano||'—'}</span>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr">
-          <div style="border-right:1px solid var(--border)">
-            <div style="background:var(--bg3);padding:5px 8px;font-size:11px;font-weight:700;text-align:center;letter-spacing:.06em;border-bottom:1px solid var(--border)">PESO</div>
-            <table style="width:100%;border-collapse:collapse">
-              ${tblRow('Peso Bruto', fkg(m.kg_bruto) + ' kg', true)}
-              <tr><td colspan="2" style="padding:3px 8px;font-size:10px;font-weight:700;color:var(--text3);background:var(--bg3);border-top:1px solid var(--border);border-bottom:1px solid var(--border);letter-spacing:.05em">MERMAS</td></tr>
-              ${tblRow('Volátil', fkg(m.merma_volatil) + ' kg', false, (m.merma_volatil||0)>0?'var(--amber)':'var(--text3)')}
-              ${tblRow('Secado', fkg(m.merma_secado) + ' kg', false, (m.merma_secado||0)>0?'var(--amber)':'var(--text3)')}
-              ${tblRow('Zarandeo', fkg(m.merma_zarandeo) + ' kg', false, (m.merma_zarandeo||0)>0?'var(--amber)':'var(--text3)')}
-              <tr style="background:var(--bg3)"><td style="padding:5px 8px;font-size:12px;font-weight:700;border-top:2px solid var(--border)">Peso Neto</td><td style="padding:5px 8px;text-align:right;font-size:12px;font-weight:700;color:var(--green);border-top:2px solid var(--border)">${fkg(m.kg_neto)} kg</td></tr>
-            </table>
-          </div>
-          <div>
-            <div style="background:var(--bg3);padding:5px 8px;font-size:11px;font-weight:700;text-align:center;letter-spacing:.06em;border-bottom:1px solid var(--border)">SERVICIOS</div>
-            <table style="width:100%;border-collapse:collapse">
-              ${tblRow('Gastos Generales', $fc(m.gastos_generales||0), false, 'var(--red)')}
-              ${tblRow('IVA (21%)', $fc(m.importe_iva||0), false, 'var(--red)')}
-              ${cptoNG > 0 ? tblRow('Cptos. No Gravados', $fc(cptoNG)) : ''}
-              <tr style="background:var(--bg3)"><td style="padding:5px 8px;font-size:12px;font-weight:700;border-top:2px solid var(--border)">💳 TOTAL</td><td style="padding:5px 8px;text-align:right;font-size:13px;font-weight:700;color:var(--red);border-top:2px solid var(--border)">-${$fc(m.total_servicios||0)}</td></tr>
-            </table>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
+    const desglosesCert = `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:${certMovs.length > 1 ? 14 : 0}px">
+        <thead>
+          <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+            <th style="padding:6px 10px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">#</th>
+            <th style="padding:6px 10px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">COE · Fecha</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Bruto</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--amber);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Merma</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--green);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Neto</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--red);font-size:11px;text-transform:uppercase;letter-spacing:.05em">Servicios</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${certMovs.map((m, i) => {
+            const fd = m.fecha ? m.fecha.split('-').reverse().join('/') : '—';
+            const mermaTotal = (m.merma_volatil||0) + (m.merma_secado||0) + (m.merma_zarandeo||0);
+            const even = i % 2 === 1;
+            return `<tr style="border-bottom:1px solid var(--bg3);${even ? 'background:var(--bg2)' : ''}">
+              <td style="padding:5px 10px;color:var(--text3)">${i+1}</td>
+              <td style="padding:5px 10px;font-family:var(--mono);font-size:11px">${m.coe||'—'} · ${fd}</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono)">${(m.kg_bruto||0).toLocaleString('es-AR')} kg</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono);color:${mermaTotal>0?'var(--amber)':'var(--text3)'}">-${mermaTotal.toLocaleString('es-AR')} kg</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${(m.kg_neto||0).toLocaleString('es-AR')} kg</td>
+              <td style="padding:5px 10px;text-align:right;font-family:var(--mono);color:var(--red)">-${$fc(m.total_servicios||0)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
 
     const totalServ  = certMovs.reduce((acc, m) => acc + (m.total_servicios||0), 0);
     const totalGG    = certMovs.reduce((acc, m) => acc + (m.gastos_generales||0), 0);
@@ -5161,7 +5233,7 @@ function renderDetalleAcopio(clave) {
     document.getElementById('det-financiero-cert-content').innerHTML = `
       ${desglosesCert}
       ${certMovs.length > 1 ? `
-      <div style="border-top:2px solid var(--border);margin-top:4px;padding-top:12px">
+      <div style="border-top:2px solid var(--border);padding-top:12px">
         <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">TOTAL ACUMULADO (${certMovs.length} certificaciones)</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
           <div style="background:var(--bg2);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden">
@@ -5368,7 +5440,7 @@ function parsearLiquidacion(texto) {
   const todasRazones = [...t.matchAll(/Raz[oó]n Social:\s*([^\n]+(?:\n(?!Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos)[^\n]+)?)/gi)];
   if (todasRazones.length >= 1) {
     d.acopio_nombre = todasRazones[0][1]
-      .replace(/\s*(Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos|CERTIFICACI[OÓ]N|DEPOSITANTE|DEPOSITARIO|COOP\.)[\s\S]*/i, '')
+      .replace(/\s*(Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos|CERTIFICACI[OÓ]N|DEPOSITANTE|DEPOSITARIO|COOP\.|Raz[oó]n Social:)[\s\S]*/i, '')
       .replace(/\n/g,' ').trim();
   }
   const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)];
@@ -5532,7 +5604,7 @@ function parsearCertificacion(texto) {
   const todasRazones = [...t.matchAll(/Raz[oó]n Social:\s*([^\n]+(?:\n(?!Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos)[^\n]+)?)/gi)];
   if (todasRazones.length >= 1) {
     d.acopio_nombre = todasRazones[0][1]
-      .replace(/\s*(Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos|CERTIFICACI[OÓ]N|DEPOSITANTE|DEPOSITARIO|COOP\.)[\s\S]*/i, '')
+      .replace(/\s*(Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos|CERTIFICACI[OÓ]N|DEPOSITANTE|DEPOSITARIO|COOP\.|Raz[oó]n Social:)[\s\S]*/i, '')
       .replace(/\n/g,' ').trim();
   }
   const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)];
@@ -5567,32 +5639,27 @@ function parsearCertificacion(texto) {
   // Volátil (del bloque PESO/MERMAS)
   m = t.match(/Vol[aá]til:\s*([\d\.,]+)/i); if(m) d.merma_volatil = num(m[1]);
 
+  // ── Secado (merma en kg, del bloque PESO/MERMAS) ───────────────────
+  // OJO: "Secado:" aparece DOS veces en el texto — la de MERMAS (kg, sin $)
+  // y la de SERVICIOS (importe, con $). Tomamos la PRIMERA ocurrencia sin $.
+  if (!d.merma_secado) {
+    const msAll = [...t.matchAll(/Secado:\s*([\d\.,]+)(?!\s*%)/gi)];
+    const msKg  = msAll.find(x => !/\$/.test(t.slice(Math.max(0, x.index-3), x.index)));
+    if (msKg) d.merma_secado = num(msKg[1]);
+  }
+
   // ── FALLBACK desde sección MERMAS de página 2 ──────────────────────
-  // pdfjs mezcla columnas al mismo nivel Y. El texto resultante puede ser:
+  // pdfjs mezcla columnas al mismo nivel Y. El texto resultante es:
   // "Zarandeo: PESO Kilos 498.00 0.00 87,462.00 0.00 Peso Neto:"
   // donde "PESO Kilos" es el header de la columna adyacente
-  // O en formato lineal: "Secado: 494.00" / "Zarandeo: 0.00" dentro del bloque MERMAS
   if (!d.merma_zarandeo) {
     // Patrón 1: "PESO Kilos 498.00" — el header de columna aparece antes del valor
     const mzPeso = t.match(/PESO\s+Kilos?\s+([\d\.,]+)/i);
     if (mzPeso) { d.merma_zarandeo = num(mzPeso[1]); }
     else {
-      // Patrón 2: "Zarandeo:" seguido de texto no-$ hasta el primer número (kilos, no $)
-      const mzFb = t.match(/Zarandeo:\s*(?:[^0-9$\n]{0,40}?)(\d[\d\.,]+)(?!\s*%)/i);
+      // Patrón 2: "Zarandeo:" seguido de texto no-$ hasta el primer número (que NO sea el de Secado/MERMAS si ya se usó arriba)
+      const mzFb = t.match(/Zarandeo:\s*(?:[^0-9$\n]{0,40}?)(\d[\d\.,]+)/i);
       if (mzFb) d.merma_zarandeo = num(mzFb[1]);
-    }
-  }
-  // Fallback para merma_secado desde el bloque MERMAS (kilos, no el $ de SERVICIOS)
-  if (!d.merma_secado) {
-    // Buscar específicamente dentro del contexto MERMAS/PESO, evitando el "Secado: $0.00" de SERVICIOS
-    // Patrón: "Secado:" seguido directamente de un número (sin '$' de por medio)
-    const msPeso = t.match(/MERMAS[\s\S]{0,200}?Secado:\s*([\d\.,]+)(?!\s*%)/i);
-    if (msPeso) {
-      d.merma_secado = num(msPeso[1]);
-    } else {
-      // Fallback genérico: "Secado:" sin "$" inmediatamente después (para no capturar el de SERVICIOS)
-      const msFb = t.match(/Secado:\s*(?!\$)([\d\.,]+)(?!\s*%)/i);
-      if (msFb) d.merma_secado = num(msFb[1]);
     }
   }
   // Peso Neto: en pdfjs puede aparecer ANTES de la etiqueta "Peso Neto:"
