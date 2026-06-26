@@ -1527,6 +1527,12 @@ tr:hover td{background:rgba(0,0,0,0.016)}
           <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
             <span class="card-title">Libro IVA Ventas</span>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="display:flex;border:1.5px solid var(--border2);border-radius:8px;overflow:hidden">
+                <button type="button" id="iva-btn-resumen" onclick="setLibroIVAVista('resumen')"
+                  style="padding:6px 14px;font-size:12px;font-weight:600;border:none;background:var(--green);color:#fff;cursor:pointer;font-family:var(--sans)">Resumen</button>
+                <button type="button" id="iva-btn-detalle" onclick="setLibroIVAVista('detalle')"
+                  style="padding:6px 14px;font-size:12px;font-weight:600;border:none;background:var(--surface);color:var(--text3);cursor:pointer;font-family:var(--sans)">Detallado</button>
+              </div>
               <select id="iva-entidad-sel" onchange="renderLibroIVA()" style="padding:7px 12px;border-radius:8px;border:1.5px solid var(--border2);background:var(--surface);font-family:var(--sans);font-size:12px">
                 <option value="AMBAS">Ambas entidades</option>
                 <option value="JAVIER">Javier Mignani</option>
@@ -5020,7 +5026,9 @@ function _cargarDesdeLocal() {
 
 function deduplicarAcopios() {
   // ── Primero: migrar claves viejas ────────────────────────────
-  Object.keys(acopios).forEach(k => {
+  let _migChanged = false;
+  Object.keys(acopios).slice().forEach(k => {
+    if (!acopios[k]) return;
     let claveNueva = null;
     if (/^\d{11}$/.test(k)) {
       claveNueva = _claveAcopio(k, acopios[k].entidad || 'JAVIER');
@@ -5033,8 +5041,10 @@ function deduplicarAcopios() {
       if (claveNueva.endsWith('_JAMJAM')) acopios[claveNueva].entidad = 'JAM&JAM';
       else if (claveNueva.endsWith('_JAVIER')) acopios[claveNueva].entidad = acopios[claveNueva].entidad || 'JAVIER';
       delete acopios[k];
+      _migChanged = true;
     }
   });
+  if (_migChanged) setTimeout(() => guardarEstado(), 500); // Persistir migración
 
   // ── Luego: fusionar duplicados del MISMO nombre + MISMA entidad ──
   // NUNCA fusionar cuentas de distinta entidad aunque tengan el mismo nombre de acopio
@@ -5549,6 +5559,17 @@ async function procesarPDFArca(input) {
   }
 }
 
+let _libroIVAVista = 'resumen'; // 'resumen' | 'detalle'
+
+function setLibroIVAVista(vista) {
+  _libroIVAVista = vista;
+  const btnR = document.getElementById('iva-btn-resumen');
+  const btnD = document.getElementById('iva-btn-detalle');
+  if (btnR) { btnR.style.background = vista === 'resumen' ? 'var(--green)' : 'var(--surface)'; btnR.style.color = vista === 'resumen' ? '#fff' : 'var(--text3)'; }
+  if (btnD) { btnD.style.background = vista === 'detalle' ? 'var(--green)' : 'var(--surface)'; btnD.style.color = vista === 'detalle' ? '#fff' : 'var(--text3)'; }
+  renderLibroIVA();
+}
+
 function switchArcaTab(tab) {
   const isProyeccion = tab === 'proyeccion';
   document.getElementById('arca-panel-proyeccion').style.display = isProyeccion ? '' : 'none';
@@ -5854,6 +5875,68 @@ function renderLibroIVA() {
     return meses[parseInt(m) - 1] + ' ' + y;
   };
 
+  // ── VISTA RESUMIDA: una fila por mes ──────────────────────────
+  if (_libroIVAVista === 'resumen') {
+    const renderResumenEntidad = (entidad, meses) => {
+      const labelEnt = entidad === 'JAM&JAM' ? 'JAM&JAM' : 'Javier Mignani';
+      const colorEnt = entidad === 'JAM&JAM' ? 'var(--amber)' : 'var(--blue)';
+      const bgEnt    = entidad === 'JAM&JAM' ? 'var(--amber-bg)' : 'var(--blue-bg)';
+      const todasLiq = Object.values(meses).flat();
+      const anualKg    = todasLiq.reduce((s, m) => s + (m.kg || 0), 0);
+      const anualTotOp = todasLiq.reduce((s, m) => s + (m.total_operacion || 0), 0);
+      const anualIVA   = todasLiq.reduce((s, m) => s + (m.iva_rg4310 || 0), 0);
+      const anualDeduc = todasLiq.reduce((s, m) => s + (m.deducciones || 0), 0);
+      const anualNeto  = todasLiq.reduce((s, m) => s + (m.neto_pagar || 0), 0);
+      return `
+        <div style="border-top:2px solid var(--border);padding:10px 14px 6px">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:700;padding:3px 12px;border-radius:10px;background:${bgEnt};color:${colorEnt};text-transform:uppercase;letter-spacing:.06em">${labelEnt}</span>
+            <span style="font-size:11px;color:var(--text3)">${todasLiq.length} liq. · Neto total: <strong style="color:var(--green)">${$m(anualNeto)}</strong></span>
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+              <th style="padding:6px 14px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Mes</th>
+              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Liq.</th>
+              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Kg</th>
+              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Total op. c/IVA</th>
+              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--amber);font-size:11px;text-transform:uppercase">IVA déb. fiscal</th>
+              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--red);font-size:11px;text-transform:uppercase">Deducciones</th>
+              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--green);font-size:11px;text-transform:uppercase">Neto cobrado</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Object.entries(meses).map(([mes, liqs], i) => {
+              const even = i % 2 === 1;
+              return `<tr style="border-bottom:1px solid var(--bg3);${even?'background:var(--bg2)':''}">
+                <td style="padding:6px 14px;font-weight:600">${fmes(mes)}</td>
+                <td style="padding:6px 10px;text-align:right;color:var(--text3)">${liqs.length}</td>
+                <td style="padding:6px 10px;text-align:right;font-family:var(--mono)">${fkg(liqs.reduce((s,m)=>s+(m.kg||0),0))}</td>
+                <td style="padding:6px 10px;text-align:right;font-family:var(--mono)">${$m(liqs.reduce((s,m)=>s+(m.total_operacion||0),0))}</td>
+                <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:var(--amber)">${$m(liqs.reduce((s,m)=>s+(m.iva_rg4310||0),0))}</td>
+                <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:var(--red)">${$m(liqs.reduce((s,m)=>s+(m.deducciones||0),0))}</td>
+                <td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${$m(liqs.reduce((s,m)=>s+(m.neto_pagar||0),0))}</td>
+              </tr>`;
+            }).join('')}
+            <tr style="background:var(--bg3);border-top:2px solid var(--border)">
+              <td style="padding:7px 14px;font-weight:700;font-size:12px">TOTAL ANUAL</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:700">${todasLiq.length}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700">${fkg(anualKg)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700">${$m(anualTotOp)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--amber)">${$m(anualIVA)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--red)">${$m(anualDeduc)}</td>
+              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${$m(anualNeto)}</td>
+            </tr>
+          </tbody>
+        </table>`;
+    };
+    const entidades = entidadFiltro === 'AMBAS' ? ['JAVIER', 'JAM&JAM'] : [entidadFiltro];
+    el.innerHTML = entidades.filter(ent => mesesPorEntidad[ent]).map(ent => renderResumenEntidad(ent, mesesPorEntidad[ent])).join('')
+      || `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta selección.</div>`;
+    return;
+  }
+
   const COLS = [
     { label: 'Fecha',             w: '80px',  align: 'left'  },
     { label: 'COE',               w: '130px', align: 'left'  },
@@ -6003,8 +6086,9 @@ function exportarLibroIVAPDF() {
 function renderAcopios() {
   // ── Migración automática de claves — iterar sobre snapshot para evitar skip ──
   const keySnapshot = Object.keys(acopios);
+  let migracionHecha = false;
   keySnapshot.forEach(k => {
-    if (!acopios[k]) return; // ya fue migrada/eliminada
+    if (!acopios[k]) return;
     let claveNueva = null;
     if (/^\d{11}$/.test(k)) {
       claveNueva = _claveAcopio(k, acopios[k].entidad || 'JAVIER');
@@ -6018,8 +6102,11 @@ function renderAcopios() {
         else if (claveNueva.endsWith('_JAVIER')) acopios[claveNueva].entidad = acopios[claveNueva].entidad || 'JAVIER';
       }
       delete acopios[k];
+      migracionHecha = true;
     }
   });
+  // Persistir claves migradas en Firebase para que no vuelvan al formato viejo al recargar
+  if (migracionHecha) guardarEstado();
 
   const keys    = Object.keys(acopios);
   const metrEl  = document.getElementById('acopio-metricas-top');
