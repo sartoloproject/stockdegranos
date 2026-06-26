@@ -1497,6 +1497,22 @@ tr:hover td{background:rgba(0,0,0,0.016)}
 
       <!-- Panel comparativo -->
       <div id="arca-comparativo"></div>
+
+      <!-- Libro IVA Ventas -->
+      <div class="card" style="margin-top:8px">
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+          <span class="card-title">Libro IVA Ventas</span>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <select id="iva-entidad-sel" onchange="renderLibroIVA()" style="padding:7px 12px;border-radius:8px;border:1.5px solid var(--border2);background:var(--surface);font-family:var(--sans);font-size:12px">
+              <option value="AMBAS">Ambas entidades</option>
+              <option value="JAVIER">Javier Mignani</option>
+              <option value="JAM&JAM">JAM&JAM</option>
+            </select>
+            <button type="button" onclick="exportarLibroIVAPDF()" class="btn btn-outline" style="width:auto;padding:7px 14px;font-size:12px">⬇ Exportar PDF</button>
+          </div>
+        </div>
+        <div id="libro-iva-content" style="padding:0"></div>
+      </div>
     </div>
 
     <!-- FLETES -->
@@ -4978,53 +4994,43 @@ function _cargarDesdeLocal() {
 }
 
 function deduplicarAcopios() {
-  // Agrupar claves por nombre normalizado (ignorando espacios extras y mayúsculas)
-  const porNombre = {};
+  // ── Primero: migrar claves viejas ────────────────────────────
   Object.keys(acopios).forEach(k => {
-    const n = acopios[k].nombre.toUpperCase().replace(/\s+/g,' ').trim();
-    if (!porNombre[n]) porNombre[n] = [];
-    porNombre[n].push(k);
+    let claveNueva = null;
+    if (/^\d{11}$/.test(k)) {
+      claveNueva = _claveAcopio(k, acopios[k].entidad || 'JAVIER');
+    } else if (/_JAM$/.test(k) && !k.endsWith('_JAMJAM')) {
+      const cuitPart = k.replace(/_JAM$/, '');
+      claveNueva = _claveAcopio(cuitPart, 'JAM&JAM');
+    }
+    if (claveNueva && claveNueva !== k && !acopios[claveNueva]) {
+      acopios[claveNueva] = { ...acopios[k] };
+      if (claveNueva.endsWith('_JAMJAM')) acopios[claveNueva].entidad = 'JAM&JAM';
+      else if (claveNueva.endsWith('_JAVIER')) acopios[claveNueva].entidad = acopios[claveNueva].entidad || 'JAVIER';
+      delete acopios[k];
+    }
   });
 
-  // Fusionar duplicados exactos
-  Object.values(porNombre).filter(ks => ks.length > 1).forEach(ks => {
-    const principal = ks.find(k => /^\d{11}$/.test(k)) || ks[0];
+  // ── Luego: fusionar duplicados del MISMO nombre + MISMA entidad ──
+  // NUNCA fusionar cuentas de distinta entidad aunque tengan el mismo nombre de acopio
+  const porNombreEntidad = {};
+  Object.keys(acopios).forEach(k => {
+    const a = acopios[k];
+    const key = (a.nombre||'').toUpperCase().replace(/\s+/g,' ').trim() + '|' + (a.entidad || 'JAVIER');
+    if (!porNombreEntidad[key]) porNombreEntidad[key] = [];
+    porNombreEntidad[key].push(k);
+  });
+
+  Object.values(porNombreEntidad).filter(ks => ks.length > 1).forEach(ks => {
+    // Preferir la clave con formato nuevo (contiene _JAVIER o _JAMJAM)
+    const principal = ks.find(k => k.includes('_JAVIER') || k.includes('_JAMJAM')) || ks[0];
     ks.filter(k => k !== principal).forEach(dup => {
       acopios[principal].movimientos.push(...acopios[dup].movimientos);
       if (!acopios[principal].cuit && acopios[dup].cuit) acopios[principal].cuit = acopios[dup].cuit;
       delete acopios[dup];
     });
   });
-
-  // También fusionar si un nombre es substring del otro (ej: "ASOCIACION DE COOPERATIVAS"
-  // dentro de "ASOCIACION DE COOPERATIVAS ARGENTINAS - COOP. LTDA.")
-  const claves = Object.keys(acopios);
-  claves.forEach(k1 => {
-    if (!acopios[k1]) return;
-    const n1 = acopios[k1].nombre.toUpperCase().replace(/\s+/g,' ').trim();
-    claves.forEach(k2 => {
-      if (k1 === k2 || !acopios[k2]) return;
-      const n2 = acopios[k2].nombre.toUpperCase().replace(/\s+/g,' ').trim();
-      // Si uno contiene al otro y tienen menos de 40 chars de diferencia → probable duplicado
-      if ((n1.includes(n2) || n2.includes(n1)) && Math.abs(n1.length - n2.length) < 40) {
-        // Conservar el que tiene más movimientos o el nombre más largo
-        const principal = acopios[k1].movimientos.length >= acopios[k2].movimientos.length ? k1 : k2;
-        const dup = principal === k1 ? k2 : k1;
-        if (!acopios[principal] || !acopios[dup]) return;
-        // Usar el nombre más largo y el CUIT si está disponible
-        if (acopios[dup].nombre.length > acopios[principal].nombre.length) {
-          acopios[principal].nombre = acopios[dup].nombre;
-        }
-        if (!acopios[principal].cuit && acopios[dup].cuit) {
-          acopios[principal].cuit = acopios[dup].cuit;
-        }
-        acopios[principal].movimientos.push(...acopios[dup].movimientos);
-        delete acopios[dup];
-      }
-    });
-  });
 }
-
 // borrarTodo reemplazado por abrirCerrarCampaña()
 // confirmarBorrado reemplazado por confirmarCerrarCampaña()
 
@@ -5094,7 +5100,7 @@ function _entidadDesdeTitular(titular_cuit) {
 
 // Clave única por acopio+entidad: "CUIT_JAVIER" o "CUIT_JAM"
 function _claveAcopio(cuit, entidad) {
-  const sufijo = entidad === 'JAM&JAM' ? 'JAM' : 'JAVIER';
+  const sufijo = entidad === 'JAM&JAM' ? 'JAMJAM' : 'JAVIER';
   return (cuit || 'SIN_CUIT') + '_' + sufijo;
 }
 
@@ -5745,19 +5751,228 @@ function renderEstimacionArca() {
   document.getElementById('arca-comparativo').innerHTML = html || `<div class="card"><div class="card-body" style="text-align:center;color:var(--text3);font-size:12px;padding:20px">Sin datos para mostrar en esta campaña. Cargá hectáreas y compromisos para comenzar.</div></div>`;
   // Repoblar selector de acopio después de cada render
   setTimeout(actualizarSelectorAcopioComp, 0);
+  // Renderizar Libro IVA
+  renderLibroIVA();
+}
+
+// ─── LIBRO IVA VENTAS ─────────────────────────────────────────────
+
+function renderLibroIVA() {
+  const el = document.getElementById('libro-iva-content');
+  if (!el) return;
+  const entidadFiltro = document.getElementById('iva-entidad-sel')?.value || 'AMBAS';
+  const campania = _normCampaña(_arcaCampaniaActual || _campañaActual);
+
+  // Recopilar todas las liquidaciones de todas las cuentas de acopio
+  const liqAll = [];
+  Object.values(acopios).forEach(a => {
+    const entidad = a.entidad || 'JAVIER';
+    if (entidadFiltro !== 'AMBAS' && entidad !== entidadFiltro) return;
+    (a.movimientos || []).forEach(m => {
+      if (m.tipo !== 'liquidacion') return;
+      if (campania && m.campania && _normCampaña(m.campania) !== campania) return;
+      liqAll.push({
+        ...m,
+        acopio: a.nombre,
+        entidad,
+        _mes: m.fecha ? m.fecha.slice(0, 7) : '0000-00' // "2026-03"
+      });
+    });
+  });
+
+  if (!liqAll.length) {
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta campaña${entidadFiltro !== 'AMBAS' ? ' y entidad' : ''}.</div>`;
+    return;
+  }
+
+  // Ordenar por fecha
+  liqAll.sort((a, b) => a.fecha.localeCompare(b.fecha));
+
+  // Agrupar por entidad → mes
+  const mesesPorEntidad = {};
+  liqAll.forEach(m => {
+    if (!mesesPorEntidad[m.entidad]) mesesPorEntidad[m.entidad] = {};
+    if (!mesesPorEntidad[m.entidad][m._mes]) mesesPorEntidad[m.entidad][m._mes] = [];
+    mesesPorEntidad[m.entidad][m._mes].push(m);
+  });
+
+  const $m = n => '$\u00A0' + n.toLocaleString('es-AR', { minimumFractionDigits: 2 });
+  const fkg = n => n.toLocaleString('es-AR');
+  const fmes = ym => {
+    if (!ym || ym === '0000-00') return '—';
+    const [y, m] = ym.split('-');
+    const meses = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    return meses[parseInt(m) - 1] + ' ' + y;
+  };
+
+  const COLS = [
+    { label: 'Fecha',             w: '80px',  align: 'left'  },
+    { label: 'COE',               w: '130px', align: 'left'  },
+    { label: 'Acopio',            w: '1fr',   align: 'left'  },
+    { label: 'Kg',                w: '90px',  align: 'right' },
+    { label: 'Total op. c/IVA',   w: '130px', align: 'right' },
+    { label: 'IVA déb. fiscal',   w: '120px', align: 'right' },
+    { label: 'Deducciones',       w: '120px', align: 'right' },
+    { label: 'Neto cobrado',      w: '130px', align: 'right' },
+  ];
+
+  const thStyle = (c, i) => `padding:6px ${i===0?'14px':'10px'};text-align:${c.align};font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap`;
+  const tdStyle = (c, i, extra='') => `padding:5px ${i===0?'14px':'10px'};text-align:${c.align};font-size:12px;font-family:var(--mono);${extra}`;
+
+  const renderEntidad = (entidad, meses) => {
+    const labelEnt = entidad === 'JAM&JAM' ? 'JAM&JAM' : 'Javier Mignani';
+    const colorEnt = entidad === 'JAM&JAM' ? 'var(--amber)' : 'var(--blue)';
+    const bgEnt    = entidad === 'JAM&JAM' ? 'var(--amber-bg)' : 'var(--blue-bg)';
+
+    // Totales anuales de esta entidad
+    const todasLiq = Object.values(meses).flat();
+    const anualTotOp  = todasLiq.reduce((s, m) => s + (m.total_operacion || 0), 0);
+    const anualIVA    = todasLiq.reduce((s, m) => s + (m.iva_rg4310 || 0), 0);
+    const anualDeduc  = todasLiq.reduce((s, m) => s + (m.deducciones || 0), 0);
+    const anualNeto   = todasLiq.reduce((s, m) => s + (m.neto_pagar || 0), 0);
+    const anualKg     = todasLiq.reduce((s, m) => s + (m.kg || 0), 0);
+
+    let html = `
+      <div style="border-top:2px solid var(--border);padding:12px 14px 6px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <span style="font-size:11px;font-weight:700;padding:3px 12px;border-radius:10px;background:${bgEnt};color:${colorEnt};text-transform:uppercase;letter-spacing:.06em">${labelEnt}</span>
+          <span style="font-size:11px;color:var(--text3)">${todasLiq.length} liquidaciones · ${fkg(anualKg)} kg · Neto: <strong style="color:var(--green)">${$m(anualNeto)}</strong></span>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <colgroup>${COLS.map(c => `<col style="width:${c.w}">`).join('')}</colgroup>
+        <thead>
+          <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+            ${COLS.map((c,i) => `<th style="${thStyle(c,i)}">${c.label}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>`;
+
+    Object.entries(meses).forEach(([mes, liqs]) => {
+      const mesKg    = liqs.reduce((s, m) => s + (m.kg || 0), 0);
+      const mesTotOp = liqs.reduce((s, m) => s + (m.total_operacion || 0), 0);
+      const mesIVA   = liqs.reduce((s, m) => s + (m.iva_rg4310 || 0), 0);
+      const mesDeduc = liqs.reduce((s, m) => s + (m.deducciones || 0), 0);
+      const mesNeto  = liqs.reduce((s, m) => s + (m.neto_pagar || 0), 0);
+
+      // Filas de detalle del mes
+      liqs.forEach((m, i) => {
+        const fd = m.fecha ? m.fecha.split('-').reverse().join('/') : '—';
+        const even = i % 2 === 1;
+        html += `<tr style="border-bottom:1px solid var(--bg3);${even ? 'background:var(--bg2)' : ''}">
+          <td style="${tdStyle(COLS[0],0)};color:var(--text3)">${fd}</td>
+          <td style="${tdStyle(COLS[1],1)};font-size:11px">${m.coe || '—'}</td>
+          <td style="${tdStyle(COLS[2],2)};font-family:var(--sans);font-size:12px;color:var(--text2)">${m.acopio}</td>
+          <td style="${tdStyle(COLS[3],3)}">${fkg(m.kg || 0)}</td>
+          <td style="${tdStyle(COLS[4],4)}">${$m(m.total_operacion || 0)}</td>
+          <td style="${tdStyle(COLS[5],5)};color:var(--amber)">${$m(m.iva_rg4310 || 0)}</td>
+          <td style="${tdStyle(COLS[6],6)};color:var(--red)">${$m(m.deducciones || 0)}</td>
+          <td style="${tdStyle(COLS[7],7)};font-weight:700;color:var(--green)">${$m(m.neto_pagar || 0)}</td>
+        </tr>`;
+      });
+
+      // Subtotal del mes
+      html += `<tr style="background:var(--bg3);border-top:1.5px solid var(--border);border-bottom:2px solid var(--border)">
+        <td colspan="3" style="padding:6px 14px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">TOTAL ${fmes(mes)}</td>
+        <td style="${tdStyle(COLS[3],3)};font-weight:700">${fkg(mesKg)}</td>
+        <td style="${tdStyle(COLS[4],4)};font-weight:700">${$m(mesTotOp)}</td>
+        <td style="${tdStyle(COLS[5],5)};font-weight:700;color:var(--amber)">${$m(mesIVA)}</td>
+        <td style="${tdStyle(COLS[6],6)};font-weight:700;color:var(--red)">${$m(mesDeduc)}</td>
+        <td style="${tdStyle(COLS[7],7)};font-weight:700;color:var(--green)">${$m(mesNeto)}</td>
+      </tr>`;
+    });
+
+    // Total anual de la entidad
+    html += `<tr style="background:var(--surface);border-top:3px solid ${colorEnt}">
+      <td colspan="3" style="padding:8px 14px;font-size:12px;font-weight:700;color:${colorEnt};text-transform:uppercase;letter-spacing:.06em">TOTAL ANUAL ${labelEnt.toUpperCase()}</td>
+      <td style="${tdStyle(COLS[3],3)};font-weight:700;font-size:13px">${fkg(anualKg)}</td>
+      <td style="${tdStyle(COLS[4],4)};font-weight:700;font-size:13px">${$m(anualTotOp)}</td>
+      <td style="${tdStyle(COLS[5],5)};font-weight:700;font-size:13px;color:var(--amber)">${$m(anualIVA)}</td>
+      <td style="${tdStyle(COLS[6],6)};font-weight:700;font-size:13px;color:var(--red)">${$m(anualDeduc)}</td>
+      <td style="${tdStyle(COLS[7],7)};font-weight:700;font-size:13px;color:var(--green)">${$m(anualNeto)}</td>
+    </tr>
+    </tbody></table>`;
+
+    return html;
+  };
+
+  const entidades = entidadFiltro === 'AMBAS' ? ['JAVIER', 'JAM&JAM'] : [entidadFiltro];
+  el.innerHTML = entidades
+    .filter(ent => mesesPorEntidad[ent])
+    .map(ent => renderEntidad(ent, mesesPorEntidad[ent]))
+    .join('') || `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta selección.</div>`;
+}
+
+function exportarLibroIVAPDF() {
+  const campania = _normCampaña(_arcaCampaniaActual || _campañaActual);
+  const entidadFiltro = document.getElementById('iva-entidad-sel')?.value || 'AMBAS';
+  const labelEnt = entidadFiltro === 'AMBAS' ? 'Ambas entidades' : entidadFiltro === 'JAM&JAM' ? 'JAM&JAM' : 'Javier Mignani';
+
+  const win = window.open('', '_blank');
+  if (!win) { mostrarToast('⚠️ Habilitá los popups para exportar'); return; }
+
+  const contenido = document.getElementById('libro-iva-content')?.innerHTML || '';
+
+  win.document.write(`<!DOCTYPE html><html lang="es">
+  <head>
+    <meta charset="UTF-8">
+    <title>Libro IVA Ventas — ${campania}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: -apple-system, system-ui, sans-serif; font-size: 11px; color: #111; background: #fff; padding: 20px; }
+      h1 { font-size: 16px; font-weight: 700; margin-bottom: 2px; }
+      .sub { font-size: 11px; color: #666; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { background: #f3f4f6; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; padding: 5px 8px; border-bottom: 2px solid #d1d5db; }
+      td { padding: 4px 8px; border-bottom: 1px solid #e5e7eb; font-size: 10px; }
+      tr.subtotal td { background: #f9fafb; font-weight: 700; border-top: 1.5px solid #9ca3af; border-bottom: 2px solid #9ca3af; }
+      tr.total-anual td { font-weight: 700; font-size: 11px; border-top: 2.5px solid #111; }
+      .right { text-align: right; }
+      .green { color: #166534; }
+      .red   { color: #991b1b; }
+      .amber { color: #92400e; }
+      .ent-header { background: #f9fafb; padding: 8px 8px 4px; border-top: 2px solid #374151; margin-top: 12px; }
+      @media print { body { padding: 10px; } }
+    </style>
+  </head>
+  <body>
+    <h1>Libro IVA Ventas — Campaña ${campania}</h1>
+    <div class="sub">${labelEnt} · Generado el ${new Date().toLocaleDateString('es-AR')}</div>
+    ${contenido
+      .replace(/style="[^"]*color:var\(--green\)[^"]*"/g, 'class="green"')
+      .replace(/style="[^"]*color:var\(--red\)[^"]*"/g, 'class="red"')
+      .replace(/style="[^"]*color:var\(--amber\)[^"]*"/g, 'class="amber"')
+      .replace(/<div style="border-top[^>]*>/g, '<div class="ent-header">')
+      .replace(/style="background:var\(--bg3\)[^"]*border-top:1\.5px[^"]*"/g, 'class="subtotal"')
+      .replace(/style="background:var\(--surface\)[^"]*border-top:3px[^"]*"/g, 'class="total-anual"')
+    }
+    <script>window.onload = () => window.print();<\/script>
+  </body></html>`);
+  win.document.close();
 }
 
 function renderAcopios() {
-  // ── Migración automática: claves viejas (solo CUIT) → nuevas (CUIT_ENTIDAD) ──
+  // ── Migración automática de claves ─────────────────────────────
   Object.keys(acopios).forEach(k => {
-    if (/^\d{11}$/.test(k)) { // clave vieja = solo 11 dígitos
-      const a = acopios[k];
-      const entidad = a.entidad || 'JAVIER';
-      const claveNueva = _claveAcopio(k, entidad);
-      if (!acopios[claveNueva]) {
-        acopios[claveNueva] = { ...a, entidad };
-        delete acopios[k];
+    let claveNueva = null;
+    // Vieja: solo CUIT (11 dígitos) → nueva: CUIT_JAVIER
+    if (/^\d{11}$/.test(k)) {
+      const ent = acopios[k].entidad || 'JAVIER';
+      claveNueva = _claveAcopio(k, ent);
+    }
+    // Vieja: CUIT_JAM (sufijo ambiguo) → nueva: CUIT_JAMJAM
+    else if (/_JAM$/.test(k) && !k.endsWith('_JAMJAM')) {
+      const cuitPart = k.replace(/_JAM$/, '');
+      claveNueva = _claveAcopio(cuitPart, 'JAM&JAM');
+    }
+    if (claveNueva && claveNueva !== k && !acopios[claveNueva]) {
+      acopios[claveNueva] = { ...acopios[k] };
+      if (!acopios[claveNueva].entidad || acopios[claveNueva].entidad === 'JAVIER' && k.endsWith('_JAM')) {
+        // Si la clave terminaba en _JAM pero entidad era JAVIER, la clave era ambigua —
+        // corregir entidad según el sufijo de clave destino
+        if (claveNueva.endsWith('_JAMJAM')) acopios[claveNueva].entidad = 'JAM&JAM';
       }
+      delete acopios[k];
     }
   });
 
