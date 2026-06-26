@@ -1362,6 +1362,21 @@ tr:hover td{background:rgba(0,0,0,0.016)}
         </div>
       </div>
 
+      <!-- Tabs de navegación -->
+      <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:18px">
+        <button type="button" id="arca-tab-proyeccion" onclick="switchArcaTab('proyeccion')"
+          style="padding:10px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:3px solid var(--green);margin-bottom:-2px;color:var(--green);font-family:var(--sans)">
+          Proyección
+        </button>
+        <button type="button" id="arca-tab-iva" onclick="switchArcaTab('iva')"
+          style="padding:10px 20px;font-size:13px;font-weight:600;border:none;background:none;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px;color:var(--text3);font-family:var(--sans)">
+          Libro IVA Ventas
+        </button>
+      </div>
+
+      <!-- Panel: PROYECCIÓN -->
+      <div id="arca-panel-proyeccion">
+
       <!-- Pills de campaña -->
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
         <span style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Campaña:</span>
@@ -1498,21 +1513,31 @@ tr:hover td{background:rgba(0,0,0,0.016)}
       <!-- Panel comparativo -->
       <div id="arca-comparativo"></div>
 
-      <!-- Libro IVA Ventas -->
-      <div class="card" style="margin-top:8px">
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
-          <span class="card-title">Libro IVA Ventas</span>
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <select id="iva-entidad-sel" onchange="renderLibroIVA()" style="padding:7px 12px;border-radius:8px;border:1.5px solid var(--border2);background:var(--surface);font-family:var(--sans);font-size:12px">
-              <option value="AMBAS">Ambas entidades</option>
-              <option value="JAVIER">Javier Mignani</option>
-              <option value="JAM&JAM">JAM&JAM</option>
-            </select>
-            <button type="button" onclick="exportarLibroIVAPDF()" class="btn btn-outline" style="width:auto;padding:7px 14px;font-size:12px">⬇ Exportar PDF</button>
-          </div>
+      </div><!-- /arca-panel-proyeccion -->
+
+      <!-- Panel: LIBRO IVA VENTAS -->
+      <div id="arca-panel-iva" style="display:none">
+        <!-- Pills de campaña duplicadas para el tab IVA -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+          <span style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Campaña:</span>
+          <div id="arca-campania-pills-iva" style="display:flex;gap:6px;flex-wrap:wrap"></div>
         </div>
-        <div id="libro-iva-content" style="padding:0"></div>
-      </div>
+
+        <div class="card">
+          <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">
+            <span class="card-title">Libro IVA Ventas</span>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <select id="iva-entidad-sel" onchange="renderLibroIVA()" style="padding:7px 12px;border-radius:8px;border:1.5px solid var(--border2);background:var(--surface);font-family:var(--sans);font-size:12px">
+                <option value="AMBAS">Ambas entidades</option>
+                <option value="JAVIER">Javier Mignani</option>
+                <option value="JAM&JAM">JAM&JAM</option>
+              </select>
+              <button type="button" onclick="exportarLibroIVAPDF()" class="btn btn-outline" style="width:auto;padding:7px 14px;font-size:12px">⬇ Exportar PDF</button>
+            </div>
+          </div>
+          <div id="libro-iva-content" style="padding:0"></div>
+        </div>
+      </div><!-- /arca-panel-iva -->
     </div>
 
     <!-- FLETES -->
@@ -5524,6 +5549,24 @@ async function procesarPDFArca(input) {
   }
 }
 
+function switchArcaTab(tab) {
+  const isProyeccion = tab === 'proyeccion';
+  document.getElementById('arca-panel-proyeccion').style.display = isProyeccion ? '' : 'none';
+  document.getElementById('arca-panel-iva').style.display       = isProyeccion ? 'none' : '';
+
+  const tabProy = document.getElementById('arca-tab-proyeccion');
+  const tabIva  = document.getElementById('arca-tab-iva');
+  if (tabProy) {
+    tabProy.style.borderBottomColor = isProyeccion ? 'var(--green)' : 'transparent';
+    tabProy.style.color = isProyeccion ? 'var(--green)' : 'var(--text3)';
+  }
+  if (tabIva) {
+    tabIva.style.borderBottomColor = isProyeccion ? 'transparent' : 'var(--green)';
+    tabIva.style.color = isProyeccion ? 'var(--text3)' : 'var(--green)';
+  }
+  if (!isProyeccion) renderLibroIVA();
+}
+
 function agregarHectareaArca() {
   const entidad = document.getElementById('arca-ha-entidad').value;
   const grano   = document.getElementById('arca-ha-grano').value;
@@ -5748,11 +5791,17 @@ function renderEstimacionArca() {
       </div>`;
   });
 
+  // Pills de campaña — sincronizar también las del tab IVA
+  const pillsElIva = document.getElementById('arca-campania-pills-iva');
+  if (pillsElIva) {
+    pillsElIva.innerHTML = campanias.map(c =>
+      `<button type="button" style="${pillStyle(campSel === c)}" onclick="seleccionarCampaniaArca('${c}')">${_labelCampaña ? _labelCampaña(c) : c}</button>`
+    ).join('');
+  }
+
   document.getElementById('arca-comparativo').innerHTML = html || `<div class="card"><div class="card-body" style="text-align:center;color:var(--text3);font-size:12px;padding:20px">Sin datos para mostrar en esta campaña. Cargá hectáreas y compromisos para comenzar.</div></div>`;
   // Repoblar selector de acopio después de cada render
   setTimeout(actualizarSelectorAcopioComp, 0);
-  // Renderizar Libro IVA
-  renderLibroIVA();
 }
 
 // ─── LIBRO IVA VENTAS ─────────────────────────────────────────────
@@ -5952,25 +6001,21 @@ function exportarLibroIVAPDF() {
 }
 
 function renderAcopios() {
-  // ── Migración automática de claves ─────────────────────────────
-  Object.keys(acopios).forEach(k => {
+  // ── Migración automática de claves — iterar sobre snapshot para evitar skip ──
+  const keySnapshot = Object.keys(acopios);
+  keySnapshot.forEach(k => {
+    if (!acopios[k]) return; // ya fue migrada/eliminada
     let claveNueva = null;
-    // Vieja: solo CUIT (11 dígitos) → nueva: CUIT_JAVIER
     if (/^\d{11}$/.test(k)) {
-      const ent = acopios[k].entidad || 'JAVIER';
-      claveNueva = _claveAcopio(k, ent);
+      claveNueva = _claveAcopio(k, acopios[k].entidad || 'JAVIER');
+    } else if (/_JAM$/.test(k) && !k.endsWith('_JAMJAM')) {
+      claveNueva = _claveAcopio(k.replace(/_JAM$/, ''), 'JAM&JAM');
     }
-    // Vieja: CUIT_JAM (sufijo ambiguo) → nueva: CUIT_JAMJAM
-    else if (/_JAM$/.test(k) && !k.endsWith('_JAMJAM')) {
-      const cuitPart = k.replace(/_JAM$/, '');
-      claveNueva = _claveAcopio(cuitPart, 'JAM&JAM');
-    }
-    if (claveNueva && claveNueva !== k && !acopios[claveNueva]) {
-      acopios[claveNueva] = { ...acopios[k] };
-      if (!acopios[claveNueva].entidad || acopios[claveNueva].entidad === 'JAVIER' && k.endsWith('_JAM')) {
-        // Si la clave terminaba en _JAM pero entidad era JAVIER, la clave era ambigua —
-        // corregir entidad según el sufijo de clave destino
+    if (claveNueva && claveNueva !== k) {
+      if (!acopios[claveNueva]) {
+        acopios[claveNueva] = { ...acopios[k] };
         if (claveNueva.endsWith('_JAMJAM')) acopios[claveNueva].entidad = 'JAM&JAM';
+        else if (claveNueva.endsWith('_JAVIER')) acopios[claveNueva].entidad = acopios[claveNueva].entidad || 'JAVIER';
       }
       delete acopios[k];
     }
