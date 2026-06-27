@@ -6111,6 +6111,7 @@ function renderAcopios() {
   const keys    = Object.keys(acopios);
   const metrEl  = document.getElementById('acopio-metricas-top');
   const cardsEl = document.getElementById('acopio-cards');
+  console.log('[renderAcopios] keys:', keys, '| metrEl:', !!metrEl, '| cardsEl:', !!cardsEl);
   if (!metrEl) return;
 
   if (!keys.length) {
@@ -6134,6 +6135,7 @@ function renderAcopios() {
     const color = entidad === 'JAM&JAM' ? 'var(--amber)' : 'var(--blue)';
     const colorBg = entidad === 'JAM&JAM' ? 'var(--amber-bg)' : 'var(--blue-bg)';
     const grupoKeys = keys.filter(k => (acopios[k].entidad || 'JAVIER') === entidad);
+    console.log('[renderGrupo]', entidad, '| grupoKeys:', grupoKeys, '| entidades en acopios:', keys.map(k => acopios[k]?.entidad));
     if (!grupoKeys.length) return '';
 
     let totGrpEnt = 0, totGrpDisp = 0, totGrpNeto = 0;
@@ -6176,7 +6178,10 @@ function renderAcopios() {
       </div>`;
   };
 
-  cardsEl.innerHTML = renderGrupo('JAVIER') + renderGrupo('JAM&JAM');
+  const htmlJavier = renderGrupo('JAVIER');
+  const htmlJam    = renderGrupo('JAM&JAM');
+  console.log('[renderAcopios] htmlJavier length:', htmlJavier.length, '| htmlJam length:', htmlJam.length);
+  cardsEl.innerHTML = htmlJavier + htmlJam;
 }
 
 function verDetalleAcopio(clave) {
