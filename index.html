@@ -5037,7 +5037,7 @@ function deduplicarAcopios() {
       claveNueva = _claveAcopio(cuitPart, 'JAM&JAM');
     }
     if (claveNueva && claveNueva !== k && !acopios[claveNueva]) {
-      acopios[claveNueva] = { ...acopios[k] };
+      acopios[claveNueva] = { ...acopios[k], movimientos: acopios[k].movimientos || [] };
       if (claveNueva.endsWith('_JAMJAM')) acopios[claveNueva].entidad = 'JAM&JAM';
       else if (claveNueva.endsWith('_JAVIER')) acopios[claveNueva].entidad = acopios[claveNueva].entidad || 'JAVIER';
       delete acopios[k];
@@ -5841,11 +5841,16 @@ function renderLibroIVA() {
     (a.movimientos || []).forEach(m => {
       if (m.tipo !== 'liquidacion') return;
       if (campania && m.campania && _normCampaña(m.campania) !== campania) return;
+      // Si deducciones no fue guardado (parseos viejos), recalcular
+      const deducciones = (m.deducciones && m.deducciones > 0)
+        ? m.deducciones
+        : Math.max(0, (m.total_operacion||0) - (m.neto_pagar||0));
       liqAll.push({
         ...m,
+        deducciones,
         acopio: a.nombre,
         entidad,
-        _mes: m.fecha ? m.fecha.slice(0, 7) : '0000-00' // "2026-03"
+        _mes: m.fecha ? m.fecha.slice(0, 7) : '0000-00'
       });
     });
   });
@@ -6097,7 +6102,7 @@ function renderAcopios() {
     }
     if (claveNueva && claveNueva !== k) {
       if (!acopios[claveNueva]) {
-        acopios[claveNueva] = { ...acopios[k] };
+        acopios[claveNueva] = { ...acopios[k], movimientos: acopios[k].movimientos || [] };
         if (claveNueva.endsWith('_JAMJAM')) acopios[claveNueva].entidad = 'JAM&JAM';
         else if (claveNueva.endsWith('_JAVIER')) acopios[claveNueva].entidad = acopios[claveNueva].entidad || 'JAVIER';
       }
@@ -6160,7 +6165,7 @@ function renderAcopios() {
           <div class="acopio-stat"><div class="acopio-stat-val" style="color:var(--green)">${fk(s.kg_disponible)}</div><div class="acopio-stat-lbl">Saldo kg</div></div>
         </div>
         <div class="progbar" style="margin-top:10px"><div class="progbar-fill" style="width:${pct}%;background:${color}"></div></div>
-        <div style="font-size:11px;color:var(--text3);margin-top:4px">${pct}% liquidado · ${a.movimientos.length} movimiento${a.movimientos.length!==1?'s':''}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${pct}% liquidado · ${(a.movimientos||[]).length} movimiento${(a.movimientos||[]).length!==1?'s':''}</div>
       </div>`;
     }).join('');
 
