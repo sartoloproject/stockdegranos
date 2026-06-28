@@ -6688,6 +6688,8 @@ async function _aplicarPDFGlobal(tipo, datos, clave) {
       total_operacion:  datos.total_operacion  || 0,
       deducciones:      datos.deducciones      || 0,
       retenciones_afip: datos.retenciones_afip || 0,
+      ret_iva:          datos.ret_iva          || 0,
+      ret_ganancias:    datos.ret_ganancias    || 0,
       iva_rg4310:       datos.iva_rg4310       || 0,
       neto_pagar:       datos.neto_pagar       || 0,
       pago_condiciones: datos.pago_condiciones || 0,
@@ -6805,11 +6807,28 @@ function parsearLiquidacion(texto) {
   m = t.match(/Total Deducciones:\s*\$\s*([\d\.,]+)/i);
   if (m) d.deducciones = num(m[1]);
 
-  // 3. Retenciones AFIP
-  // FIX: patrón directo (etiqueta seguida de valor) primero
+  // 3. Retenciones AFIP (total)
   m = t.match(/Total Retenciones Afip:\s*\$\s*([\d\.,]+)/i);
   if (!m) m = t.match(/\$\s*([\d\.,]+)\s+Total Otras Retenciones/i);
   if (m) d.retenciones_afip = num(m[1]);
+
+  // 3b. Desglose retenciones: Ret. IVA (RG 1394) y Ret. Ganancias — para Subdiario IVA
+  // "I.V.A. RET. IVA RG 1394/2004 ... 7% $ 382,576.80"
+  const mRetIVA = t.match(/I\.V\.A\.?\s+(?:RET\.|Retenci[oó]n)\s+IVA[^\n]*?(\d{1,2}%)\s*\$\s*([\d\.,]+)/i)
+                || t.match(/IVA\s+RG\s+1394[^\n]*?\$\s*([\d\.,]+)/i);
+  if (mRetIVA) d.ret_iva = num(mRetIVA[mRetIVA.length - 1]);
+
+  // "Impuesto a las Ganancias ... 2% $ 105,012.19"
+  const mRetGan = t.match(/Impuesto\s+a\s+las\s+Ganancias[^\n]*?(\d{1,2}%)\s*\$\s*([\d\.,]+)/i)
+                || t.match(/RET\.?\s*GANANCIAS?[^\n]*?\$\s*([\d\.,]+)/i);
+  if (mRetGan) d.ret_ganancias = num(mRetGan[mRetGan.length - 1]);
+
+  // Si no capturó el desglose, inferir desde retenciones_afip e iva_rg4310
+  // ret_iva ≈ retenciones_afip * 7/9  (proporción típica 7% vs 2%)
+  if (!d.ret_iva && d.retenciones_afip) {
+    d.ret_iva      = Math.round(d.retenciones_afip * 7 / 9 * 100) / 100;
+    d.ret_ganancias = Math.round(d.retenciones_afip * 2 / 9 * 100) / 100;
+  }
 
   // 4. Neto a Pagar
   // FIX: patrón directo primero — "Importe Neto a Pagar: $ X"
