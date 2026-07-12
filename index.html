@@ -5880,6 +5880,7 @@ function renderLibroIVA() {
     return meses[parseInt(m) - 1] + ' ' + y;
   };
 
+
   // ── VISTA RESUMIDA: una fila por mes ──────────────────────────
   if (_libroIVAVista === 'resumen') {
     const renderResumenEntidad = (entidad, meses) => {
@@ -5887,157 +5888,201 @@ function renderLibroIVA() {
       const colorEnt = entidad === 'JAM&JAM' ? 'var(--amber)' : 'var(--blue)';
       const bgEnt    = entidad === 'JAM&JAM' ? 'var(--amber-bg)' : 'var(--blue-bg)';
       const todasLiq = Object.values(meses).flat();
-      const anualKg    = todasLiq.reduce((s, m) => s + (m.kg || 0), 0);
-      const anualTotOp = todasLiq.reduce((s, m) => s + (m.total_operacion || 0), 0);
-      const anualIVA   = todasLiq.reduce((s, m) => s + (m.iva_rg4310 || 0), 0);
-      const anualDeduc = todasLiq.reduce((s, m) => s + (m.deducciones || 0), 0);
-      const anualNeto  = todasLiq.reduce((s, m) => s + (m.neto_pagar || 0), 0);
+      const anualKg      = todasLiq.reduce((s,l) => s+(l.kg||0), 0);
+      const anualNetGrav = todasLiq.reduce((s,l) => s+netoGravado(l), 0);
+      const anualIVA     = todasLiq.reduce((s,l) => s+ivaLiq(l), 0);
+      const anualRetIVA  = todasLiq.reduce((s,l) => s+getRetIVA(l), 0);
+      const anualRetGan  = todasLiq.reduce((s,l) => s+getRetGan(l), 0);
+      const anualTotal   = todasLiq.reduce((s,l) => s+(l.total_operacion||0), 0);
+      const anualNeto    = anualTotal - anualRetIVA - anualRetGan;
+
       return `
         <div style="border-top:2px solid var(--border);padding:10px 14px 6px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
             <span style="font-size:11px;font-weight:700;padding:3px 12px;border-radius:10px;background:${bgEnt};color:${colorEnt};text-transform:uppercase;letter-spacing:.06em">${labelEnt}</span>
-            <span style="font-size:11px;color:var(--text3)">${todasLiq.length} liq. · Neto total: <strong style="color:var(--green)">${$m(anualNeto)}</strong></span>
+            <span style="font-size:11px;color:var(--text3)">${todasLiq.length} liq. · Kg: <strong>${fkg(anualKg)}</strong> · Neto Gravado: <strong>${$m(anualNetGrav)}</strong> · IVA: <strong>${$m(anualIVA)}</strong></span>
           </div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead>
-            <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
-              <th style="padding:6px 14px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Mes</th>
-              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Liq.</th>
-              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Kg</th>
-              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Total op. c/IVA</th>
-              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--amber);font-size:11px;text-transform:uppercase">IVA déb. fiscal</th>
-              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--red);font-size:11px;text-transform:uppercase">Deducciones</th>
-              <th style="padding:6px 10px;text-align:right;font-weight:600;color:var(--green);font-size:11px;text-transform:uppercase">Neto cobrado</th>
-            </tr>
-          </thead>
+          <thead><tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+            <th style="padding:6px 14px;text-align:left;font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase">Mes</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase">Liq.</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase">Kg</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase">Neto Gravado</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--amber);font-size:10px;text-transform:uppercase">IVA (10,5%)</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase">Total c/IVA</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--red);font-size:10px;text-transform:uppercase">Ret. IVA</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--red);font-size:10px;text-transform:uppercase">Ret. Gan.</th>
+            <th style="padding:6px 8px;text-align:right;font-weight:600;color:var(--green);font-size:10px;text-transform:uppercase">Neto cobrado</th>
+          </tr></thead>
           <tbody>
             ${Object.entries(meses).map(([mes, liqs], i) => {
-              const even = i % 2 === 1;
+              const even = i%2===1;
+              const mesKg     = liqs.reduce((s,l)=>s+(l.kg||0),0);
+              const mesNG     = liqs.reduce((s,l)=>s+netoGravado(l),0);
+              const mesIVA    = liqs.reduce((s,l)=>s+ivaLiq(l),0);
+              const mesTot    = liqs.reduce((s,l)=>s+(l.total_operacion||0),0);
+              const mesRetIVA = liqs.reduce((s,l)=>s+getRetIVA(l),0);
+              const mesRetGan = liqs.reduce((s,l)=>s+getRetGan(l),0);
+              const mesNeto   = mesTot - mesRetIVA - mesRetGan;
               return `<tr style="border-bottom:1px solid var(--bg3);${even?'background:var(--bg2)':''}">
                 <td style="padding:6px 14px;font-weight:600">${fmes(mes)}</td>
-                <td style="padding:6px 10px;text-align:right;color:var(--text3)">${liqs.length}</td>
-                <td style="padding:6px 10px;text-align:right;font-family:var(--mono)">${fkg(liqs.reduce((s,m)=>s+(m.kg||0),0))}</td>
-                <td style="padding:6px 10px;text-align:right;font-family:var(--mono)">${$m(liqs.reduce((s,m)=>s+(m.total_operacion||0),0))}</td>
-                <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:var(--amber)">${$m(liqs.reduce((s,m)=>s+(m.iva_rg4310||0),0))}</td>
-                <td style="padding:6px 10px;text-align:right;font-family:var(--mono);color:var(--red)">${$m(liqs.reduce((s,m)=>s+(m.deducciones||0),0))}</td>
-                <td style="padding:6px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${$m(liqs.reduce((s,m)=>s+(m.neto_pagar||0),0))}</td>
+                <td style="padding:6px 8px;text-align:right;color:var(--text3)">${liqs.length}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${fkg(mesKg)}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${$m(mesNG)}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--amber)">${$m(mesIVA)}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono)">${$m(mesTot)}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--red)">-${$m(mesRetIVA)}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono);color:var(--red)">-${$m(mesRetGan)}</td>
+                <td style="padding:6px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${$m(mesNeto)}</td>
               </tr>`;
             }).join('')}
             <tr style="background:var(--bg3);border-top:2px solid var(--border)">
               <td style="padding:7px 14px;font-weight:700;font-size:12px">TOTAL ANUAL</td>
-              <td style="padding:7px 10px;text-align:right;font-weight:700">${todasLiq.length}</td>
-              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700">${fkg(anualKg)}</td>
-              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700">${$m(anualTotOp)}</td>
-              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--amber)">${$m(anualIVA)}</td>
-              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--red)">${$m(anualDeduc)}</td>
-              <td style="padding:7px 10px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${$m(anualNeto)}</td>
+              <td style="padding:7px 8px;text-align:right;font-weight:700">${todasLiq.length}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700">${fkg(anualKg)}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700">${$m(anualNetGrav)}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--amber)">${$m(anualIVA)}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700">${$m(anualTotal)}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--red)">-${$m(anualRetIVA)}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--red)">-${$m(anualRetGan)}</td>
+              <td style="padding:7px 8px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${$m(anualNeto)}</td>
             </tr>
           </tbody>
         </table>`;
     };
-    const entidades = entidadFiltro === 'AMBAS' ? ['JAVIER', 'JAM&JAM'] : [entidadFiltro];
+    const entidades = entidadFiltro === 'AMBAS' ? ['JAVIER','JAM&JAM'] : [entidadFiltro];
     el.innerHTML = entidades.filter(ent => mesesPorEntidad[ent]).map(ent => renderResumenEntidad(ent, mesesPorEntidad[ent])).join('')
       || `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta selección.</div>`;
     return;
   }
 
-  const COLS = [
-    { label: 'Fecha',             w: '80px',  align: 'left'  },
-    { label: 'COE',               w: '130px', align: 'left'  },
-    { label: 'Acopio',            w: '1fr',   align: 'left'  },
-    { label: 'Kg',                w: '90px',  align: 'right' },
-    { label: 'Total op. c/IVA',   w: '130px', align: 'right' },
-    { label: 'IVA déb. fiscal',   w: '120px', align: 'right' },
-    { label: 'Deducciones',       w: '120px', align: 'right' },
-    { label: 'Neto cobrado',      w: '130px', align: 'right' },
+  // ── VISTA DETALLADA: formato subdiario (LIQ A + RET por liquidación) ──
+  const COLS_DET = [
+    'Fecha', 'Comprobante', 'N° COE / Acopio', 'Neto Gravado', 'IVA (10,5%)', 'Exentos/No Alc.', 'Retenciones', 'Total'
   ];
+  const thD = (txt, right) => `<th style="padding:5px 8px;text-align:${right?'right':'left'};font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase;border-bottom:2px solid var(--border);white-space:nowrap">${txt}</th>`;
+  const tdD = (txt, right, color, bold) => `<td style="padding:4px 8px;text-align:${right?'right':'left'};font-family:var(--mono);font-size:11px;${color?'color:'+color:''};${bold?'font-weight:700':''}">${txt}</td>`;
 
-  const thStyle = (c, i) => `padding:6px ${i===0?'14px':'10px'};text-align:${c.align};font-weight:600;color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap`;
-  const tdStyle = (c, i, extra='') => `padding:5px ${i===0?'14px':'10px'};text-align:${c.align};font-size:12px;font-family:var(--mono);${extra}`;
-
-  const renderEntidad = (entidad, meses) => {
+  const renderDetalleEntidad = (entidad, meses) => {
     const labelEnt = entidad === 'JAM&JAM' ? 'JAM&JAM' : 'Javier Mignani';
     const colorEnt = entidad === 'JAM&JAM' ? 'var(--amber)' : 'var(--blue)';
     const bgEnt    = entidad === 'JAM&JAM' ? 'var(--amber-bg)' : 'var(--blue-bg)';
-
-    // Totales anuales de esta entidad
     const todasLiq = Object.values(meses).flat();
-    const anualTotOp  = todasLiq.reduce((s, m) => s + (m.total_operacion || 0), 0);
-    const anualIVA    = todasLiq.reduce((s, m) => s + (m.iva_rg4310 || 0), 0);
-    const anualDeduc  = todasLiq.reduce((s, m) => s + (m.deducciones || 0), 0);
-    const anualNeto   = todasLiq.reduce((s, m) => s + (m.neto_pagar || 0), 0);
-    const anualKg     = todasLiq.reduce((s, m) => s + (m.kg || 0), 0);
+
+    // Acumulados anuales
+    let aNG=0, aIVA=0, aTot=0, aRetIVA=0, aRetGan=0;
+    todasLiq.forEach(l => {
+      aNG     += netoGravado(l); aIVA    += ivaLiq(l);
+      aTot    += l.total_operacion||0;
+      aRetIVA += getRetIVA(l);  aRetGan += getRetGan(l);
+    });
 
     let html = `
-      <div style="border-top:2px solid var(--border);padding:12px 14px 6px">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+      <div style="border-top:2px solid var(--border);padding:10px 14px 6px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
           <span style="font-size:11px;font-weight:700;padding:3px 12px;border-radius:10px;background:${bgEnt};color:${colorEnt};text-transform:uppercase;letter-spacing:.06em">${labelEnt}</span>
-          <span style="font-size:11px;color:var(--text3)">${todasLiq.length} liquidaciones · ${fkg(anualKg)} kg · Neto: <strong style="color:var(--green)">${$m(anualNeto)}</strong></span>
+          <span style="font-size:11px;color:var(--text3)">CUIT: ${entidad==='JAM&JAM'?'30-71207381-7':'20-18455813-1'}</span>
         </div>
       </div>
       <table style="width:100%;border-collapse:collapse">
-        <colgroup>${COLS.map(c => `<col style="width:${c.w}">`).join('')}</colgroup>
-        <thead>
-          <tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
-            ${COLS.map((c,i) => `<th style="${thStyle(c,i)}">${c.label}</th>`).join('')}
-          </tr>
-        </thead>
+        <thead><tr style="background:var(--bg3)">
+          ${thD('Fecha',false)}${thD('Comp.',false)}${thD('COE / Acopio',false)}
+          ${thD('Neto Gravado',true)}${thD('IVA 10,5%',true)}${thD('Ret./Int.',true)}${thD('Total',true)}
+        </tr></thead>
         <tbody>`;
 
     Object.entries(meses).forEach(([mes, liqs]) => {
-      const mesKg    = liqs.reduce((s, m) => s + (m.kg || 0), 0);
-      const mesTotOp = liqs.reduce((s, m) => s + (m.total_operacion || 0), 0);
-      const mesIVA   = liqs.reduce((s, m) => s + (m.iva_rg4310 || 0), 0);
-      const mesDeduc = liqs.reduce((s, m) => s + (m.deducciones || 0), 0);
-      const mesNeto  = liqs.reduce((s, m) => s + (m.neto_pagar || 0), 0);
+      let mesNG=0, mesIVA=0, mesTot=0, mesRetIVA=0, mesRetGan=0;
+      liqs.forEach(l => {
+        const fd = l.fecha ? l.fecha.split('-').reverse().join('/') : '—';
+        const ng  = netoGravado(l);
+        const iva = ivaLiq(l);
+        const tot = l.total_operacion || 0;
+        const riv = getRetIVA(l);
+        const rga = getRetGan(l);
+        mesNG+=ng; mesIVA+=iva; mesTot+=tot; mesRetIVA+=riv; mesRetGan+=rga;
 
-      // Filas de detalle del mes
-      liqs.forEach((m, i) => {
-        const fd = m.fecha ? m.fecha.split('-').reverse().join('/') : '—';
-        const even = i % 2 === 1;
-        html += `<tr style="border-bottom:1px solid var(--bg3);${even ? 'background:var(--bg2)' : ''}">
-          <td style="${tdStyle(COLS[0],0)};color:var(--text3)">${fd}</td>
-          <td style="${tdStyle(COLS[1],1)};font-size:11px">${m.coe || '—'}</td>
-          <td style="${tdStyle(COLS[2],2)};font-family:var(--sans);font-size:12px;color:var(--text2)">${m.acopio}</td>
-          <td style="${tdStyle(COLS[3],3)}">${fkg(m.kg || 0)}</td>
-          <td style="${tdStyle(COLS[4],4)}">${$m(m.total_operacion || 0)}</td>
-          <td style="${tdStyle(COLS[5],5)};color:var(--amber)">${$m(m.iva_rg4310 || 0)}</td>
-          <td style="${tdStyle(COLS[6],6)};color:var(--red)">${$m(m.deducciones || 0)}</td>
-          <td style="${tdStyle(COLS[7],7)};font-weight:700;color:var(--green)">${$m(m.neto_pagar || 0)}</td>
+        // Fila LIQ A
+        html += `<tr style="border-bottom:1px solid var(--bg3)">
+          ${tdD(fd,false,'var(--text3)')}
+          ${tdD('<strong>LIQ A</strong>',false)}
+          ${tdD(`${l.coe||'—'} · ${l.acopio}`,false,'var(--text2)')}
+          ${tdD($m(ng),true)}
+          ${tdD($m(iva),true,'var(--amber)')}
+          ${tdD('—',true,'var(--text3)')}
+          ${tdD($m(tot),true,'','true')}
+        </tr>`;
+
+        // Fila RET IVA
+        if (riv > 0) html += `<tr style="border-bottom:1px solid var(--bg3);background:var(--bg2)">
+          ${tdD(fd,false,'var(--text3)')}
+          ${tdD('RET IVA',false,'var(--red)')}
+          ${tdD(l.coe||'—',false,'var(--text3)')}
+          ${tdD('—',true,'var(--text3)')}${tdD('—',true,'var(--text3)')}
+          ${tdD('-'+$m(riv),true,'var(--red)')}
+          ${tdD('-'+$m(riv),true,'var(--red)')}
+        </tr>`;
+
+        // Fila RET Ganancias
+        if (rga > 0) html += `<tr style="border-bottom:1px solid var(--bg3);background:var(--bg2)">
+          ${tdD(fd,false,'var(--text3)')}
+          ${tdD('RET GAN.',false,'var(--red)')}
+          ${tdD(l.coe||'—',false,'var(--text3)')}
+          ${tdD('—',true,'var(--text3)')}${tdD('—',true,'var(--text3)')}
+          ${tdD('-'+$m(rga),true,'var(--red)')}
+          ${tdD('-'+$m(rga),true,'var(--red)')}
         </tr>`;
       });
 
-      // Subtotal del mes
+      const mesNeto = mesTot - mesRetIVA - mesRetGan;
+      // Subtotal mes
       html += `<tr style="background:var(--bg3);border-top:1.5px solid var(--border);border-bottom:2px solid var(--border)">
-        <td colspan="3" style="padding:6px 14px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">TOTAL ${fmes(mes)}</td>
-        <td style="${tdStyle(COLS[3],3)};font-weight:700">${fkg(mesKg)}</td>
-        <td style="${tdStyle(COLS[4],4)};font-weight:700">${$m(mesTotOp)}</td>
-        <td style="${tdStyle(COLS[5],5)};font-weight:700;color:var(--amber)">${$m(mesIVA)}</td>
-        <td style="${tdStyle(COLS[6],6)};font-weight:700;color:var(--red)">${$m(mesDeduc)}</td>
-        <td style="${tdStyle(COLS[7],7)};font-weight:700;color:var(--green)">${$m(mesNeto)}</td>
+        <td colspan="3" style="padding:6px 8px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em">TOTALES ${fmes(mes)}</td>
+        ${tdD($m(mesNG),true,'','true')}
+        ${tdD($m(mesIVA),true,'var(--amber)','true')}
+        ${tdD('-'+$m(mesRetIVA+mesRetGan),true,'var(--red)','true')}
+        ${tdD($m(mesNeto),true,'var(--green)','true')}
+      </tr>
+      <!-- Detalle retenciones del mes -->
+      <tr style="background:var(--bg2);border-bottom:1px solid var(--border)">
+        <td colspan="5" style="padding:3px 8px 3px 20px;font-size:10px;color:var(--text3)">Ret. IVA (RG 1394)</td>
+        ${tdD('-'+$m(mesRetIVA),true,'var(--red)')}${tdD('',true)}
+      </tr>
+      <tr style="background:var(--bg2);border-bottom:2px solid var(--border)">
+        <td colspan="5" style="padding:3px 8px 5px 20px;font-size:10px;color:var(--text3)">Ret. Ganancias</td>
+        ${tdD('-'+$m(mesRetGan),true,'var(--red)')}${tdD('',true)}
       </tr>`;
     });
 
-    // Total anual de la entidad
+    // Total anual
+    const aNeto = aTot - aRetIVA - aRetGan;
     html += `<tr style="background:var(--surface);border-top:3px solid ${colorEnt}">
-      <td colspan="3" style="padding:8px 14px;font-size:12px;font-weight:700;color:${colorEnt};text-transform:uppercase;letter-spacing:.06em">TOTAL ANUAL ${labelEnt.toUpperCase()}</td>
-      <td style="${tdStyle(COLS[3],3)};font-weight:700;font-size:13px">${fkg(anualKg)}</td>
-      <td style="${tdStyle(COLS[4],4)};font-weight:700;font-size:13px">${$m(anualTotOp)}</td>
-      <td style="${tdStyle(COLS[5],5)};font-weight:700;font-size:13px;color:var(--amber)">${$m(anualIVA)}</td>
-      <td style="${tdStyle(COLS[6],6)};font-weight:700;font-size:13px;color:var(--red)">${$m(anualDeduc)}</td>
-      <td style="${tdStyle(COLS[7],7)};font-weight:700;font-size:13px;color:var(--green)">${$m(anualNeto)}</td>
+      <td colspan="3" style="padding:8px;font-size:12px;font-weight:700;color:${colorEnt};text-transform:uppercase">TOTAL ANUAL ${labelEnt.toUpperCase()}</td>
+      ${tdD($m(aNG),true,'','true')}
+      ${tdD($m(aIVA),true,'var(--amber)','true')}
+      ${tdD('-'+$m(aRetIVA+aRetGan),true,'var(--red)','true')}
+      ${tdD($m(aNeto),true,'var(--green)','true')}
     </tr>
-    </tbody></table>`;
+    <!-- Detalle IVA por alícuota -->
+    <tr style="background:var(--bg2)">
+      <td colspan="7" style="padding:6px 8px 2px;font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Detalle IVA por alícuota</td>
+    </tr>
+    <tr style="background:var(--bg2);border-bottom:2px solid var(--border)">
+      <td colspan="2" style="padding:3px 8px 6px 20px;font-size:10px;color:var(--text3)">10,5%</td>
+      ${tdD($m(aNG),true,'var(--text2)')}
+      ${tdD($m(aIVA),true,'var(--amber)')}
+      <td colspan="2"></td><td></td>
+    </tr>`;
 
+    html += `</tbody></table>`;
     return html;
   };
 
-  const entidades = entidadFiltro === 'AMBAS' ? ['JAVIER', 'JAM&JAM'] : [entidadFiltro];
-  el.innerHTML = entidades
-    .filter(ent => mesesPorEntidad[ent])
-    .map(ent => renderEntidad(ent, mesesPorEntidad[ent]))
-    .join('') || `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta selección.</div>`;
+  const entidades = entidadFiltro === 'AMBAS' ? ['JAVIER','JAM&JAM'] : [entidadFiltro];
+  el.innerHTML = entidades.filter(ent => mesesPorEntidad[ent])
+    .map(ent => renderDetalleEntidad(ent, mesesPorEntidad[ent])).join('')
+    || `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta selección.</div>`;
 }
 
 function exportarLibroIVAPDF() {
@@ -7116,6 +7161,8 @@ async function procesarPDFLiquidacion(input) {
       total_operacion: datos.total_operacion||0,
       deducciones: datos.deducciones||0,
       retenciones_afip: datos.retenciones_afip||0,
+      ret_iva: datos.ret_iva||0,
+      ret_ganancias: datos.ret_ganancias||0,
       neto_pagar: datos.neto_pagar||0,
       iva_rg4310: datos.iva_rg4310||0,
       pago_condiciones: datos.pago_condiciones||0,
