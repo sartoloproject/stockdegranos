@@ -6744,7 +6744,7 @@ async function procesarPDFGlobal(input, tipo) {
       clave = Object.keys(acopios).find(k => acopios[k].nombre.toLowerCase().includes(nombre.toLowerCase().slice(0,15)));
     }
 
-    if (acopioNuevo) {
+    if (!clave) {
       // Pedir confirmación antes de crear, con selector de entidad
       statusEl.innerHTML = `
         <div class="alert" style="background:var(--amber-bg);border:1px solid #FCD34D;border-radius:var(--radius-lg);padding:14px 16px">
