@@ -6810,6 +6810,7 @@ async function _confirmarPDFGlobal(tipo, cuit, nombre) {
 async function _aplicarPDFGlobal(tipo, datos, clave) {
   if (tipo === 'liquidacion') {
     const a = acopios[clave];
+    if (!a.movimientos) a.movimientos = [];
     const nuevoMov = {
       tipo: 'liquidacion',
       fecha: datos.fecha || new Date().toISOString().split('T')[0],
@@ -6842,6 +6843,7 @@ async function _aplicarPDFGlobal(tipo, datos, clave) {
     }
   } else {
     const a = acopios[clave];
+    if (!a.movimientos) a.movimientos = [];
     console.log('[Certificación] datos parseados del PDF:', JSON.stringify(datos));
     console.log('[Certificación] clave de cuenta usada:', clave, '| nombre cuenta:', a.nombre, '| CUIT cuenta:', a.cuit);
     a.movimientos.push({
