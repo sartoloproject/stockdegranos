@@ -6778,7 +6778,7 @@ async function procesarPDFGlobal(input, tipo) {
 
     // Acopio ya existe — buscar clave correcta (puede haber dos: JAVIER y JAM)
     // Preferir la que corresponda a la entidad detectada del documento
-    const entidadDoc = _entidadDesdeTitular(datos.acopio_cuit || '') || acopios[clave]?.entidad || 'JAVIER';
+    const entidadDoc = _entidadDesdeTitular(datos.vendedor_cuit || '') || acopios[clave]?.entidad || 'JAVIER';
     const claveConEntidad = _claveAcopio(cuit || '', entidadDoc);
     const claveEfectiva = acopios[claveConEntidad] ? claveConEntidad : clave;
     await _aplicarPDFGlobal(tipo, datos, claveEfectiva);
@@ -6910,6 +6910,9 @@ function parsearLiquidacion(texto) {
   }
   const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)];
   if (todosCuits.length >= 1) d.acopio_cuit = todosCuits[0][1];
+  // El SEGUNDO C.U.I.T. del documento es el del VENDEDOR (titular de la
+  // liquidación: Javier Mignani o JAM&JAM) — define a qué entidad pertenece.
+  if (todosCuits.length >= 2) d.vendedor_cuit = todosCuits[1][1];
 
   // Fecha de la operación
   m = t.match(/Fecha:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
@@ -7122,6 +7125,7 @@ function parsearCertificacion(texto) {
   }
   const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)];
   if (todosCuits.length >= 1) d.acopio_cuit = todosCuits[0][1];
+  if (todosCuits.length >= 2) d.vendedor_cuit = todosCuits[1][1];
 
   // ── PESOS — el valor puede aparecer ANTES o DESPUÉS del label en pdfjs ─
   // Caso normal: "Peso Bruto: 87,960.00"
@@ -7257,7 +7261,7 @@ async function procesarPDFLiquidacion(input) {
     // Solo auto-detectar si no hay cuenta activa (carga desde vista general)
     let clave = acopioActual;
     if (!clave && datos.acopio_nombre) {
-      const entidadLiq = _entidadDesdeTitular(datos.acopio_cuit || '') || 'JAVIER';
+      const entidadLiq = _entidadDesdeTitular(datos.vendedor_cuit || '') || 'JAVIER';
       clave = obtenerOCrearAcopio(datos.acopio_nombre, datos.acopio_cuit || '', entidadLiq);
     }
     if (!clave || !acopios[clave]) {
@@ -7311,7 +7315,7 @@ async function procesarPDFCertificacion(input) {
     // Si estamos dentro de una cuenta abierta → usarla siempre (no re-detectar del PDF)
     let clave = acopioActual;
     if (!clave && datos.acopio_nombre) {
-      const entidadCert = _entidadDesdeTitular(datos.acopio_cuit || '') || 'JAVIER';
+      const entidadCert = _entidadDesdeTitular(datos.vendedor_cuit || '') || 'JAVIER';
       clave = obtenerOCrearAcopio(datos.acopio_nombre, datos.acopio_cuit || '', entidadCert);
     }
     if (!clave || !acopios[clave]) {
