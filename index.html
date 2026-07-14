@@ -5594,14 +5594,14 @@ let _libroIVAVista = 'resumen'; // 'resumen' | 'detalle'
 // y neto_pagar ya estaban bien guardados, así que recalculamos por aritmética:
 // retenciones_afip = total_operacion - deducciones - neto_pagar
 function recalcularRetencionesLiquidaciones() {
-  let corregidas = 0, revisadas = 0;
+  let corregidas = 0, revisadas = 0, noSePudo = 0;
   Object.values(acopios).forEach(a => {
     (a.movimientos || []).forEach(m => {
       if (m.tipo !== 'liquidacion') return;
       revisadas++;
-      if (m.total_operacion == null || m.deducciones == null || !m.neto_pagar) return;
+      if (m.total_operacion == null || m.deducciones == null || !m.neto_pagar) { noSePudo++; return; }
       const retCalc = Math.round((m.total_operacion - m.deducciones - m.neto_pagar) * 100) / 100;
-      if (retCalc <= 0) return;
+      if (retCalc <= 0.01) { noSePudo++; return; }
       // Sólo tocar si difiere de forma significativa (>$1) del valor ya guardado
       if (Math.abs((m.retenciones_afip || 0) - retCalc) > 1) {
         m.retenciones_afip = retCalc;
@@ -5614,7 +5614,11 @@ function recalcularRetencionesLiquidaciones() {
   if (corregidas > 0) {
     guardarEstado();
     renderLibroIVA();
-    alert(`Se recalcularon ${corregidas} de ${revisadas} liquidaciones. Las retenciones de IVA y Ganancias ya quedaron corregidas.`);
+    alert(`Se recalcularon ${corregidas} de ${revisadas} liquidaciones. Las retenciones de IVA y Ganancias ya quedaron corregidas.`
+      + (noSePudo ? `\n\n⚠️ ${noSePudo} liquidaciones no se pudieron recalcular (el campo "Deducciones" guardado no es confiable en esos registros). Para esas, lo más seguro es volver a subir el PDF original — ahora que el parser está corregido, va a REEMPLAZAR el registro viejo automáticamente (no genera duplicados).` : '')
+    );
+  } else if (noSePudo === revisadas && revisadas > 0) {
+    alert(`No se pudo recalcular ninguna de las ${revisadas} liquidaciones: el campo "Deducciones" guardado en esos registros no es confiable (parecen haber sido cargados con una versión más vieja del parser).\n\nLa forma más segura de corregirlos es volver a subir los mismos PDF originales: ahora el sistema detecta el COE y REEMPLAZA el registro viejo en vez de duplicarlo.`);
   } else {
     alert(`Se revisaron ${revisadas} liquidaciones y ya estaban todas correctas — no había nada para corregir.`);
   }
@@ -6806,7 +6810,7 @@ async function _confirmarPDFGlobal(tipo, cuit, nombre) {
 async function _aplicarPDFGlobal(tipo, datos, clave) {
   if (tipo === 'liquidacion') {
     const a = acopios[clave];
-    a.movimientos.push({
+    const nuevoMov = {
       tipo: 'liquidacion',
       fecha: datos.fecha || new Date().toISOString().split('T')[0],
       coe: datos.coe || '',
@@ -6824,7 +6828,18 @@ async function _aplicarPDFGlobal(tipo, datos, clave) {
       pago_condiciones: datos.pago_condiciones || 0,
       comision:         datos.comision         || 0,
       comision_pct:     datos.comision_pct     || 0,
-    });
+    };
+    // Si ya existe una liquidación con el mismo COE en esta cuenta, la
+    // reemplazamos en vez de duplicarla (permite re-subir un PDF ya cargado
+    // para corregirlo con una versión más nueva del parser, sin generar copias).
+    const idxExistente = nuevoMov.coe
+      ? a.movimientos.findIndex(m => m.tipo === 'liquidacion' && m.coe === nuevoMov.coe)
+      : -1;
+    if (idxExistente >= 0) {
+      a.movimientos[idxExistente] = nuevoMov;
+    } else {
+      a.movimientos.push(nuevoMov);
+    }
   } else {
     const a = acopios[clave];
     console.log('[Certificación] datos parseados del PDF:', JSON.stringify(datos));
