@@ -1538,6 +1538,7 @@ tr:hover td{background:rgba(0,0,0,0.016)}
                 <option value="JAVIER">Javier Mignani</option>
                 <option value="JAM&JAM">JAM&JAM</option>
               </select>
+              <button type="button" onclick="recalcularRetencionesLiquidaciones()" class="btn btn-outline" style="width:auto;padding:7px 14px;font-size:12px" title="Recalcula Retención IVA / Ganancias de las liquidaciones ya guardadas, sin volver a subir los PDF">↻ Recalcular retenciones</button>
               <button type="button" onclick="exportarLibroIVAPDF()" class="btn btn-outline" style="width:auto;padding:7px 14px;font-size:12px">⬇ Exportar PDF</button>
             </div>
           </div>
@@ -5571,10 +5572,9 @@ function netoGravado(l) {
 function ivaLiq(l) {
   return (l.total_operacion || 0) - netoGravado(l);
 }
-// Retenciones de IVA sufridas (RG 2937/4310 — "IVA RG 4310" es el régimen
-// específico de retención de IVA para el sector granario, se suma a `ret_iva` genérico si existiera)
+// Retenciones de IVA sufridas (RG 2937 — retención de IVA sobre la operación)
 function getRetIVA(l) {
-  return (l.ret_iva || 0) + (l.iva_rg4310 || 0);
+  return l.ret_iva || 0;
 }
 // Retención de Ganancias sufrida (RG 830)
 function getRetGan(l) {
@@ -5587,6 +5587,38 @@ function formatCuit(cuit) {
 }
 
 let _libroIVAVista = 'resumen'; // 'resumen' | 'detalle'
+
+// Repara las liquidaciones YA guardadas (parseadas con la versión vieja del
+// parser, que confundía "IVA RG 4310/2018" con el total real de Retenciones
+// AFIP). No hace falta volver a subir los PDF: total_operacion, deducciones
+// y neto_pagar ya estaban bien guardados, así que recalculamos por aritmética:
+// retenciones_afip = total_operacion - deducciones - neto_pagar
+function recalcularRetencionesLiquidaciones() {
+  let corregidas = 0, revisadas = 0;
+  Object.values(acopios).forEach(a => {
+    (a.movimientos || []).forEach(m => {
+      if (m.tipo !== 'liquidacion') return;
+      revisadas++;
+      if (m.total_operacion == null || m.deducciones == null || !m.neto_pagar) return;
+      const retCalc = Math.round((m.total_operacion - m.deducciones - m.neto_pagar) * 100) / 100;
+      if (retCalc <= 0) return;
+      // Sólo tocar si difiere de forma significativa (>$1) del valor ya guardado
+      if (Math.abs((m.retenciones_afip || 0) - retCalc) > 1) {
+        m.retenciones_afip = retCalc;
+        m.ret_iva       = Math.round(retCalc * 7 / 9 * 100) / 100;
+        m.ret_ganancias = Math.round(retCalc * 2 / 9 * 100) / 100;
+        corregidas++;
+      }
+    });
+  });
+  if (corregidas > 0) {
+    guardarEstado();
+    renderLibroIVA();
+    alert(`Se recalcularon ${corregidas} de ${revisadas} liquidaciones. Las retenciones de IVA y Ganancias ya quedaron corregidas.`);
+  } else {
+    alert(`Se revisaron ${revisadas} liquidaciones y ya estaban todas correctas — no había nada para corregir.`);
+  }
+}
 
 function setLibroIVAVista(vista) {
   _libroIVAVista = vista;
@@ -5860,13 +5892,6 @@ function renderLibroIVA() {
   const entidadFiltro = document.getElementById('iva-entidad-sel')?.value || 'AMBAS';
   const campania = _normCampaña(_arcaCampaniaActual || _campañaActual);
 
-  // ── DIAGNÓSTICO TEMPORAL: ver por consola por qué no aparecen liquidaciones ──
-  console.log('[LibroIVA] campaña filtro:', campania, '| entidad filtro:', entidadFiltro, '| # acopios:', Object.keys(acopios).length);
-  Object.values(acopios).forEach(a => {
-    const liqs = (a.movimientos||[]).filter(m => m.tipo === 'liquidacion');
-    if (liqs.length) console.log('[LibroIVA] acopio:', a.nombre, '| entidad:', a.entidad, '| liquidaciones:', liqs.length, '| campanias en esas liq.:', [...new Set(liqs.map(m=>JSON.stringify(m.campania)))], '| ejemplo fecha/total:', liqs[0].fecha, liqs[0].total_operacion);
-  });
-
   // Recopilar todas las liquidaciones de todas las cuentas de acopio
   const liqAll = [];
   Object.values(acopios).forEach(a => {
@@ -5889,7 +5914,6 @@ function renderLibroIVA() {
       });
     });
   });
-  console.log('[LibroIVA] total liquidaciones recopiladas:', liqAll.length);
 
   if (!liqAll.length) {
     el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--text3);font-size:12px">Sin liquidaciones para esta campaña${entidadFiltro !== 'AMBAS' ? ' y entidad' : ''}.</div>`;
@@ -6919,21 +6943,14 @@ function parsearLiquidacion(texto) {
 
   // 3b. Desglose retenciones: Ret. IVA (RG 1394) y Ret. Ganancias — para Subdiario IVA
   // "I.V.A. RET. IVA RG 1394/2004 ... 7% $ 382,576.80"
-  const mRetIVA = t.match(/I\.V\.A\.?\s+(?:RET\.|Retenci[oó]n)\s+IVA[^\n]*?(\d{1,2}%)\s*\$\s*([\d\.,]+)/i)
-                || t.match(/IVA\s+RG\s+1394[^\n]*?\$\s*([\d\.,]+)/i);
+  const mRetIVA = t.match(/I\.V\.A\.?\s+(?:RET\.|Retenci[oó]n)\s+IVA[\s\S]{0,200}?(\d{1,2})\s*%\s*\$\s*([\d\.,]+)/i)
+                || t.match(/IVA\s+RG\s+1394[\s\S]{0,200}?\$\s*([\d\.,]+)/i);
   if (mRetIVA) d.ret_iva = num(mRetIVA[mRetIVA.length - 1]);
 
   // "Impuesto a las Ganancias ... 2% $ 105,012.19"
-  const mRetGan = t.match(/Impuesto\s+a\s+las\s+Ganancias[^\n]*?(\d{1,2}%)\s*\$\s*([\d\.,]+)/i)
-                || t.match(/RET\.?\s*GANANCIAS?[^\n]*?\$\s*([\d\.,]+)/i);
+  const mRetGan = t.match(/Impuesto\s+a\s+las\s+Ganancias[\s\S]{0,200}?(\d{1,2})\s*%\s*\$\s*([\d\.,]+)/i)
+                || t.match(/RET\.?\s*GANANCIAS?[\s\S]{0,200}?\$\s*([\d\.,]+)/i);
   if (mRetGan) d.ret_ganancias = num(mRetGan[mRetGan.length - 1]);
-
-  // Si no capturó el desglose, inferir desde retenciones_afip e iva_rg4310
-  // ret_iva ≈ retenciones_afip * 7/9  (proporción típica 7% vs 2%)
-  if (!d.ret_iva && d.retenciones_afip) {
-    d.ret_iva      = Math.round(d.retenciones_afip * 7 / 9 * 100) / 100;
-    d.ret_ganancias = Math.round(d.retenciones_afip * 2 / 9 * 100) / 100;
-  }
 
   // 4. Neto a Pagar
   // FIX: patrón directo primero — "Importe Neto a Pagar: $ X"
@@ -6942,6 +6959,24 @@ function parsearLiquidacion(texto) {
   if (!m) m = t.match(/Total Deducciones:[^\r\n]+[\r\n]+\s*\$\s*([\d\.,]+)\s*[\r\n]+\s*\$\s*0[,\.]0/i);
   if (!m) m = t.match(/\$\s*([\d\.,]+)\s*[\r\n]+\s*\$\s*0[,\.]0[\d]*\s*[\r\n]+\s*Total Operaci[oó]n/i);
   if (m) d.neto_pagar = num(m[1]);
+
+  // 3c. Retenciones AFIP (total) — recalculado de forma robusta.
+  // total_operacion, deducciones y neto_pagar se parsean de forma confiable
+  // (valores "inline" pegados a su etiqueta). La sección "IMPORTES TOTALES"
+  // en cambio queda desordenada por pdfjs: la etiqueta "Total Retenciones Afip:"
+  // termina pegada al valor de "IVA RG 4310/2018" en vez del suyo propio.
+  // Por eso preferimos derivar el total de retenciones por aritmética:
+  // Total Operación - Deducciones - Neto a Pagar.
+  if (d.total_operacion && d.deducciones != null && d.neto_pagar) {
+    const retCalc = d.total_operacion - d.deducciones - d.neto_pagar;
+    if (retCalc > 0.01) d.retenciones_afip = Math.round(retCalc * 100) / 100;
+  }
+  // Si no se pudo desglosar IVA/Ganancias por texto, repartir el total ya
+  // correcto en la proporción típica 7% (IVA) / 2% (Ganancias)
+  if ((!d.ret_iva || !d.ret_ganancias) && d.retenciones_afip) {
+    d.ret_iva       = Math.round(d.retenciones_afip * 7 / 9 * 100) / 100;
+    d.ret_ganancias = Math.round(d.retenciones_afip * 2 / 9 * 100) / 100;
+  }
 
   // 5. IVA RG 4310
   // FIX: patrón directo primero — "IVA RG 4310/2018: $ X" (etiqueta+valor en la misma línea)
