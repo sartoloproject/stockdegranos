@@ -6781,9 +6781,18 @@ async function procesarPDFGlobal(input, tipo) {
     const entidadDoc = _entidadDesdeTitular(datos.vendedor_cuit || '') || acopios[clave]?.entidad || 'JAVIER';
     const claveConEntidad = _claveAcopio(cuit || '', entidadDoc);
     const claveEfectiva = acopios[claveConEntidad] ? claveConEntidad : clave;
+    console.log('[procesarPDFGlobal] DIAGNÓSTICO:',
+      '\n  vendedor_cuit detectado en el PDF:', datos.vendedor_cuit,
+      '\n  acopio_cuit (comprador) detectado:', datos.acopio_cuit,
+      '\n  _entidadDesdeTitular(vendedor_cuit):', _entidadDesdeTitular(datos.vendedor_cuit || ''),
+      '\n  entidadDoc final usada:', entidadDoc,
+      '\n  clave encontrada por CUIT/nombre:', clave, '| su entidad actual:', acopios[clave]?.entidad,
+      '\n  claveConEntidad buscada:', claveConEntidad, '| existe?:', !!acopios[claveConEntidad],
+      '\n  claveEfectiva (donde se va a guardar):', claveEfectiva
+    );
     await _aplicarPDFGlobal(tipo, datos, claveEfectiva);
     input.value = '';
-    statusEl.innerHTML = `<div class="alert alert-success">✅ ${tipoDoc} asignada a <strong>${acopios[claveEfectiva].nombre}</strong></div>`;
+    statusEl.innerHTML = `<div class="alert alert-success">✅ ${tipoDoc} asignada a <strong>${acopios[claveEfectiva].nombre}</strong> (${entidadDoc === 'JAM&JAM' ? 'JAM&JAM' : 'Javier Mignani'})</div>`;
     renderAcopios();
 
   } catch(err) {
@@ -7278,6 +7287,13 @@ async function procesarPDFLiquidacion(input) {
       statusEl.innerHTML = '<div class="alert alert-warning">No se pudo identificar el acopio. Abrí la cuenta del acopio antes de cargar.</div>';
       return;
     }
+    console.log('[procesarPDFLiquidacion] DIAGNÓSTICO:',
+      '\n  acopioActual (cuenta abierta al momento de subir):', acopioActual, '| su entidad:', acopioActual ? acopios[acopioActual]?.entidad : '(ninguna abierta)',
+      '\n  vendedor_cuit detectado en el PDF:', datos.vendedor_cuit,
+      '\n  entidadDetectada por ese CUIT:', entidadDetectada,
+      '\n  ¿se redirigió?:', redirigido,
+      '\n  clave final (donde se guarda):', clave
+    );
 
     const a = acopios[clave];
     if (!a.movimientos) a.movimientos = [];
