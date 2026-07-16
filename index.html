@@ -6917,11 +6917,15 @@ function parsearLiquidacion(texto) {
       .replace(/\s*(Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos|CERTIFICACI[OÓ]N|DEPOSITANTE|DEPOSITARIO|COOP\.|Raz[oó]n Social:)[\s\S]*/i, '')
       .replace(/\n/g,' ').trim();
   }
-  const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)];
-  if (todosCuits.length >= 1) d.acopio_cuit = todosCuits[0][1];
-  // El SEGUNDO C.U.I.T. del documento es el del VENDEDOR (titular de la
-  // liquidación: Javier Mignani o JAM&JAM) — define a qué entidad pertenece.
-  if (todosCuits.length >= 2) d.vendedor_cuit = todosCuits[1][1];
+  const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)].map(m => m[1]);
+  // El orden en que aparecen el CUIT del comprador y el del vendedor en el texto
+  // extraído del PDF NO es confiable (depende del layout y puede variar).
+  // En cambio, SÍ sabemos de antemano los CUIT de Javier y JAM&JAM (son fijos),
+  // así que identificamos al vendedor por coincidencia directa contra esos valores,
+  // y al acopio (comprador) como "el otro" CUIT del documento.
+  const _cuitsConocidos = [_CUIT_JAVIER, _CUIT_JAM];
+  d.vendedor_cuit = todosCuits.find(c => _cuitsConocidos.includes(c)) || todosCuits[1] || '';
+  d.acopio_cuit    = todosCuits.find(c => c !== d.vendedor_cuit) || todosCuits[0] || '';
 
   // Fecha de la operación
   m = t.match(/Fecha:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
@@ -7132,9 +7136,10 @@ function parsearCertificacion(texto) {
       .replace(/\s*(Domicilio:|Localidad:|C\.U\.I\.T\.|I\.V\.A\.|Ingresos|CERTIFICACI[OÓ]N|DEPOSITANTE|DEPOSITARIO|COOP\.|Raz[oó]n Social:)[\s\S]*/i, '')
       .replace(/\n/g,' ').trim();
   }
-  const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)];
-  if (todosCuits.length >= 1) d.acopio_cuit = todosCuits[0][1];
-  if (todosCuits.length >= 2) d.vendedor_cuit = todosCuits[1][1];
+  const todosCuits = [...t.matchAll(/C\.U\.I\.T\.:\s*(\d{11})/gi)].map(m => m[1]);
+  const _cuitsConocidosCert = [_CUIT_JAVIER, _CUIT_JAM];
+  d.vendedor_cuit = todosCuits.find(c => _cuitsConocidosCert.includes(c)) || todosCuits[1] || '';
+  d.acopio_cuit    = todosCuits.find(c => c !== d.vendedor_cuit) || todosCuits[0] || '';
 
   // ── PESOS — el valor puede aparecer ANTES o DESPUÉS del label en pdfjs ─
   // Caso normal: "Peso Bruto: 87,960.00"
