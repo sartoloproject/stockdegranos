@@ -7257,11 +7257,21 @@ async function procesarPDFLiquidacion(input) {
     const texto = await _extraerTextoPDF(pdf);
     const datos = parsearLiquidacion(texto);
 
-    // Si estamos dentro de una cuenta abierta → usarla siempre (no re-detectar del PDF)
-    // Solo auto-detectar si no hay cuenta activa (carga desde vista general)
+    // Si estamos dentro de una cuenta abierta, la usamos como default — PERO
+    // si el PDF indica claramente (por CUIT del vendedor) que es de la OTRA
+    // entidad, redirigimos a la cuenta correcta en vez de forzarla a la abierta
+    // (evita cargar mal si el usuario dejó abierta la cuenta equivocada).
     let clave = acopioActual;
+    const entidadDetectada = _entidadDesdeTitular(datos.vendedor_cuit || '');
+    let redirigido = false;
+    if (clave && entidadDetectada && entidadDetectada !== (acopios[clave]?.entidad || 'JAVIER')) {
+      const cuitAcopio   = acopios[clave]?.cuit || datos.acopio_cuit || '';
+      const nombreAcopio = acopios[clave]?.nombre || datos.acopio_nombre || '';
+      clave = obtenerOCrearAcopio(nombreAcopio, cuitAcopio, entidadDetectada);
+      redirigido = true;
+    }
     if (!clave && datos.acopio_nombre) {
-      const entidadLiq = _entidadDesdeTitular(datos.vendedor_cuit || '') || 'JAVIER';
+      const entidadLiq = entidadDetectada || 'JAVIER';
       clave = obtenerOCrearAcopio(datos.acopio_nombre, datos.acopio_cuit || '', entidadLiq);
     }
     if (!clave || !acopios[clave]) {
@@ -7269,11 +7279,14 @@ async function procesarPDFLiquidacion(input) {
       return;
     }
 
-    acopios[clave].movimientos.push({
+    const a = acopios[clave];
+    if (!a.movimientos) a.movimientos = [];
+    const nuevoMov = {
       tipo:'liquidacion',
       fecha: datos.fecha || new Date().toISOString().split('T')[0],
       coe: datos.coe||'', grano: datos.grano||'',
       kg: datos.kg||0, precio_kg: datos.precio_kg||0,
+      campania: datos.campania || '',
       total_operacion: datos.total_operacion||0,
       deducciones: datos.deducciones||0,
       retenciones_afip: datos.retenciones_afip||0,
@@ -7284,12 +7297,22 @@ async function procesarPDFLiquidacion(input) {
       pago_condiciones: datos.pago_condiciones||0,
       comision: datos.comision||0,
       comision_pct: datos.comision_pct||0,
-    });
+    };
+    // Reemplazar si ya existe una liquidación con el mismo COE en esta cuenta
+    const idxExistente = nuevoMov.coe
+      ? a.movimientos.findIndex(m => m.tipo === 'liquidacion' && m.coe === nuevoMov.coe)
+      : -1;
+    if (idxExistente >= 0) a.movimientos[idxExistente] = nuevoMov;
+    else a.movimientos.push(nuevoMov);
+
     guardarEstado();
     renderDetalleAcopio(clave);
     drop.className='pdf-drop loaded';
     drop.innerHTML=`<div class="pdf-drop-icon" style="font-size:22px">✅</div><div class="pdf-drop-title" style="color:var(--green)">${file.name}</div><div class="pdf-drop-sub" style="color:var(--green)">Liquidación registrada · <span style="text-decoration:underline;cursor:pointer" onclick="resetDrop('liq-drop','liq-input','📋','Seleccionar Liquidación','C1116A / Liquidación Primaria de Granos','procesarPDFLiquidacion')">Cargar otra</span></div>`;
-    statusEl.innerHTML=`<div class="alert alert-success">✅ Liquidación COE ${datos.coe||'—'} · ${(datos.kg||0).toLocaleString('es-AR')} kg · Neto: $${(datos.neto_pagar||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</div>`;
+    const avisoRedir = redirigido
+      ? `<div class="alert alert-warning" style="margin-bottom:8px">↔️ Este PDF es de <strong>${entidadDetectada === 'JAM&JAM' ? 'JAM&JAM' : 'Javier Mignani'}</strong>, no de la cuenta que tenías abierta — se asignó automáticamente a la cuenta correcta.</div>`
+      : '';
+    statusEl.innerHTML=`${avisoRedir}<div class="alert alert-success">✅ Liquidación COE ${datos.coe||'—'} · ${(datos.kg||0).toLocaleString('es-AR')} kg · Neto: $${(datos.neto_pagar||0).toLocaleString('es-AR',{minimumFractionDigits:2})}</div>`;
   } catch(err) {
     drop.className='pdf-drop'; drop.innerHTML='<div class="pdf-drop-icon">📋</div><div class="pdf-drop-title">Seleccionar Liquidación</div><div class="pdf-drop-sub">C1116A / Liquidación Primaria de Granos</div>';
     drop.onclick=()=>document.getElementById('liq-input').click();
@@ -7312,10 +7335,17 @@ async function procesarPDFCertificacion(input) {
     const texto = await _extraerTextoPDF(pdf);
     const datos = parsearCertificacion(texto);
 
-    // Si estamos dentro de una cuenta abierta → usarla siempre (no re-detectar del PDF)
+    // Si estamos dentro de una cuenta abierta, la usamos como default — pero
+    // si el PDF indica otra entidad por CUIT del vendedor, redirigimos.
     let clave = acopioActual;
+    const entidadDetectadaCert = _entidadDesdeTitular(datos.vendedor_cuit || '');
+    if (clave && entidadDetectadaCert && entidadDetectadaCert !== (acopios[clave]?.entidad || 'JAVIER')) {
+      const cuitAcopio   = acopios[clave]?.cuit || datos.acopio_cuit || '';
+      const nombreAcopio = acopios[clave]?.nombre || datos.acopio_nombre || '';
+      clave = obtenerOCrearAcopio(nombreAcopio, cuitAcopio, entidadDetectadaCert);
+    }
     if (!clave && datos.acopio_nombre) {
-      const entidadCert = _entidadDesdeTitular(datos.vendedor_cuit || '') || 'JAVIER';
+      const entidadCert = entidadDetectadaCert || 'JAVIER';
       clave = obtenerOCrearAcopio(datos.acopio_nombre, datos.acopio_cuit || '', entidadCert);
     }
     if (!clave || !acopios[clave]) {
