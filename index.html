@@ -1152,6 +1152,7 @@ tr:hover td{background:rgba(0,0,0,0.016)}
 
                 <!-- BÚSQUEDA POR COSECHA + N° EN CAMPAÑA -->
                 <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;margin-bottom:14px">
+                  <div id="egr-filtro-grano-aviso" style="display:none;margin-bottom:10px"></div>
                   <div class="form-grid" style="margin-bottom:10px">
                     <div class="form-group" style="margin-bottom:0">
                       <label>Cosecha</label>
@@ -3218,6 +3219,7 @@ function llenarFormulario(d) {
   };
   // Reset bolsones seleccionados al cargar nueva CPE
   _egrBolsones = [];
+  _egrIgnorarFiltroGrano = false;
   renderEgrBolsonesSeleccionados();
   // Poblar selector de cosechas y resetear N°
   poblarCosechasEgreso();
@@ -3419,17 +3421,47 @@ function _stockSeguro(b) {
   return ing - egr;
 }
 
+let _egrIgnorarFiltroGrano = false; // true = el usuario decidió ver todos los granos igual
+
+// Devuelve el grano detectado en la última CPE cargada, o null si no hay CPE o el usuario desactivó el filtro
+function _granoFiltroEgr() {
+  if (_egrIgnorarFiltroGrano) return null;
+  return (ultimaCPE && ultimaCPE.grano) ? _normalizarGrano(ultimaCPE.grano) : null;
+}
+
+function _renderAvisoFiltroGrano() {
+  const cont = document.getElementById('egr-filtro-grano-aviso');
+  if (!cont) return;
+  const grano = (ultimaCPE && ultimaCPE.grano) ? _normalizarGrano(ultimaCPE.grano) : null;
+  if (!grano) { cont.style.display = 'none'; return; }
+  cont.style.display = 'block';
+  if (_egrIgnorarFiltroGrano) {
+    cont.innerHTML = `<div style="font-size:12px;color:var(--text3);background:var(--bg3);border-radius:var(--radius);padding:7px 12px">
+      Mostrando bolsones de <strong>todos los granos</strong> — la CPE dice <strong>${grano}</strong>.
+      <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="_egrIgnorarFiltroGrano=false;poblarCosechasEgreso();_renderAvisoFiltroGrano()">Volver a filtrar por ${grano}</span>
+    </div>`;
+  } else {
+    cont.innerHTML = `<div style="font-size:12px;color:var(--green);background:var(--green-light);border-radius:var(--radius);padding:7px 12px">
+      🌾 Mostrando solo bolsones de <strong>${grano}</strong> (según el PDF de la CPE).
+      <span style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="_egrIgnorarFiltroGrano=true;poblarCosechasEgreso();_renderAvisoFiltroGrano()">Ver todos los granos</span>
+    </div>`;
+  }
+}
+
 function poblarCosechasEgreso() {
   const sel = document.getElementById('egr-busq-cosecha');
   if (!sel) return;
+  const granoFiltro = _granoFiltroEgr();
   const cosechas = [...new Set(
     bolsones
       .filter(b => _stockSeguro(b) > 0 && b.cosecha)
+      .filter(b => !granoFiltro || _normalizarGrano(b.grano) === granoFiltro)
       .map(b => b.cosecha)
   )].sort().reverse();
   sel.innerHTML = '<option value="">— Seleccionar cosecha —</option>' +
     cosechas.map(c => `<option value="${c}">${c}</option>`).join('');
   if (cosechas.length === 1) { sel.value = cosechas[0]; actualizarUbicacionesEgr(); }
+  _renderAvisoFiltroGrano();
 }
 
 function actualizarUbicacionesEgr() {
@@ -3437,6 +3469,7 @@ function actualizarUbicacionesEgr() {
   const ubSel    = document.getElementById('egr-busq-ubicacion');
   const numSel   = document.getElementById('egr-busq-num');
   const cont     = document.getElementById('egr-busq-resultado');
+  const granoFiltro = _granoFiltroEgr();
   cont.innerHTML = '';
   numSel.innerHTML = '<option value="">— Elegí cosecha y ubicación —</option>';
   numSel.disabled  = true;
@@ -3450,11 +3483,12 @@ function actualizarUbicacionesEgr() {
   const ubicaciones = [...new Set(
     bolsones
       .filter(b => b.cosecha === cosecha && _stockSeguro(b) > 0)
+      .filter(b => !granoFiltro || _normalizarGrano(b.grano) === granoFiltro)
       .map(b => b.ubicacion || b.campo || '—')
   )].sort();
 
   if (!ubicaciones.length) {
-    ubSel.innerHTML = '<option value="">Sin bolsones disponibles</option>';
+    ubSel.innerHTML = `<option value="">Sin bolsones${granoFiltro ? ' de ' + granoFiltro : ''} disponibles</option>`;
     ubSel.disabled  = true;
     return;
   }
@@ -3469,6 +3503,7 @@ function actualizarOpcionesBolsonEgr() {
   const ubicacion= document.getElementById('egr-busq-ubicacion').value;
   const numSel   = document.getElementById('egr-busq-num');
   const cont     = document.getElementById('egr-busq-resultado');
+  const granoFiltro = _granoFiltroEgr();
   cont.innerHTML = '';
 
   if (!cosecha || !ubicacion) {
@@ -3481,11 +3516,12 @@ function actualizarOpcionesBolsonEgr() {
     b.cosecha === cosecha &&
     (b.ubicacion || b.campo || '—') === ubicacion &&
     _stockSeguro(b) > 0 &&
-    b.numCampaña
+    b.numCampaña &&
+    (!granoFiltro || _normalizarGrano(b.grano) === granoFiltro)
   ).sort((a, b) => a.numCampaña - b.numCampaña);
 
   if (!disponibles.length) {
-    numSel.innerHTML = '<option value="">Sin bolsones disponibles</option>';
+    numSel.innerHTML = `<option value="">Sin bolsones${granoFiltro ? ' de ' + granoFiltro : ''} disponibles</option>`;
     numSel.disabled  = true;
     return;
   }
@@ -5211,6 +5247,24 @@ function calcularStatsAcopioCamp(clave, campania) {
            kg_disponible: kg_entregado - kg_mermado - kg_liquidado };
 }
 
+// Igual que calcularStatsAcopioCamp, pero desglosado por grano — cada movimiento
+// ya trae su propio campo `grano`, así que agrupamos por eso en vez de sumar todo junto.
+function calcularStatsAcopioCampPorGrano(clave, campania) {
+  const out = {}; // { "Soja": {kg_entregado, kg_mermado, kg_liquidado, neto_pagar, kg_disponible}, ... }
+  const a = acopios[clave];
+  if (!a) return out;
+  (a.movimientos || []).forEach(m => {
+    if (campania && m.campania && m.campania !== campania) return;
+    const g = m.grano || 'Sin especificar';
+    if (!out[g]) out[g] = { kg_entregado:0, kg_mermado:0, kg_liquidado:0, neto_pagar:0 };
+    if (m.tipo === 'entrega')     out[g].kg_entregado  += m.kg || 0;
+    if (m.tipo === 'merma')       out[g].kg_mermado    += m.kg || 0;
+    if (m.tipo === 'liquidacion') { out[g].kg_liquidado += m.kg || 0; out[g].neto_pagar += m.neto_pagar || 0; }
+  });
+  Object.values(out).forEach(s => { s.kg_disponible = s.kg_entregado - s.kg_mermado - s.kg_liquidado; });
+  return out;
+}
+
 function calcularStatsAcopio(clave) {
   let kg_entregado = 0, kg_mermado = 0, kg_liquidado = 0, neto_pagar = 0;
   (acopios[clave]?.movimientos || []).forEach(m => {
@@ -5804,7 +5858,7 @@ function renderEstimacionArca() {
       const hayDatos = proyectado > 0 || acopioEntradas.length > 0 || tot.entregado > 0;
       if (!hayDatos) return;
 
-      const dispSinComprometer = proyectado - tot.comprometido;
+      const dispSinComprometer = proyectado - tot.entregado;
 
       // Fila de encabezado del grano con totales
       tablaHTML += `
@@ -5812,7 +5866,7 @@ function renderEstimacionArca() {
           <td colspan="2" style="padding:7px 10px;font-weight:700;font-size:13px">${g}</td>
           <td style="padding:7px 10px;text-align:right;font-family:var(--mono);color:var(--text3)">${proyectado > 0 ? proyectado.toLocaleString('es-AR') + ' kg' : '—'}</td>
           <td colspan="4" style="padding:7px 10px;text-align:right;font-size:11px;color:var(--text3)">
-            ${proyectado > 0 ? `Disp. sin comprometer: <span style="font-weight:700;color:${dispSinComprometer>=0?'var(--green)':'var(--red)'}">${dispSinComprometer.toLocaleString('es-AR')} kg</span>` : ''}
+            ${proyectado > 0 ? `Disp. sin entregar: <span style="font-weight:700;color:${dispSinComprometer>=0?'var(--green)':'var(--red)'}">${dispSinComprometer.toLocaleString('es-AR')} kg</span>` : ''}
           </td>
         </tr>`;
 
@@ -6379,16 +6433,58 @@ function renderDetalleAcopio(clave) {
   }
 
   const s = calcularStatsAcopioCamp(clave, campFiltro);
+  const statsPorGrano = calcularStatsAcopioCampPorGrano(clave, campFiltro);
   document.getElementById('det-nombre').textContent = a.nombre;
   document.getElementById('det-cuit').textContent = a.cuit ? 'CUIT: ' + a.cuit : '';
 
   const fk = n => n.toLocaleString('es-AR');
   const labelCamp = campFiltro ? ` · ${campFiltro}` : '';
-  document.getElementById('det-metricas').innerHTML = `
-    <div class="metric-card"><div class="metric-label">Total entregado${labelCamp}</div><div class="metric-value">${fk(s.kg_entregado - s.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
-    <div class="metric-card"><div class="metric-label">Mermas${labelCamp}</div><div class="metric-value" style="color:var(--amber)">${fk(s.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
-    <div class="metric-card"><div class="metric-label">Liquidado${labelCamp}</div><div class="metric-value" style="color:var(--blue)">${fk(s.kg_liquidado)}</div><div class="metric-unit">kilogramos</div></div>
-    <div class="metric-card"><div class="metric-label">Saldo disponible${labelCamp}</div><div class="metric-value" style="color:var(--green)">${fk(s.kg_disponible)}</div><div class="metric-unit">kg sin liquidar</div></div>`;
+  const granosConDatos = Object.keys(statsPorGrano);
+  const GTAGmet = g => `<span class="tag tag-${(g||'').toLowerCase().replace('í','i').replace('ó','o')}" style="font-size:11px">${g}</span>`;
+
+  if (granosConDatos.length <= 1) {
+    // Un solo grano (o ninguno) — no hace falta desglosar, mostramos las 4 tarjetas como siempre
+    document.getElementById('det-metricas').innerHTML = `
+      <div class="metric-card"><div class="metric-label">Total entregado${labelCamp}</div><div class="metric-value">${fk(s.kg_entregado - s.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
+      <div class="metric-card"><div class="metric-label">Mermas${labelCamp}</div><div class="metric-value" style="color:var(--amber)">${fk(s.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
+      <div class="metric-card"><div class="metric-label">Liquidado${labelCamp}</div><div class="metric-value" style="color:var(--blue)">${fk(s.kg_liquidado)}</div><div class="metric-unit">kilogramos</div></div>
+      <div class="metric-card"><div class="metric-label">Saldo disponible${labelCamp}</div><div class="metric-value" style="color:var(--green)">${fk(s.kg_disponible)}</div><div class="metric-unit">kg sin liquidar</div></div>`;
+  } else {
+    // Varios granos en esta cuenta — desglosar fila por grano, con fila TOTAL al final
+    document.getElementById('det-metricas').innerHTML = `
+      <div class="card" style="grid-column:1/-1;margin-bottom:0">
+        <div class="card-header"><span class="card-title">Resumen por grano${labelCamp}</span></div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:var(--bg3);border-bottom:2px solid var(--border)">
+            <th style="padding:8px 14px;text-align:left;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Grano</th>
+            <th style="padding:8px 14px;text-align:right;font-weight:600;color:var(--text3);font-size:11px;text-transform:uppercase">Entregado</th>
+            <th style="padding:8px 14px;text-align:right;font-weight:600;color:var(--amber);font-size:11px;text-transform:uppercase">Mermas</th>
+            <th style="padding:8px 14px;text-align:right;font-weight:600;color:var(--blue);font-size:11px;text-transform:uppercase">Liquidado</th>
+            <th style="padding:8px 14px;text-align:right;font-weight:600;color:var(--green);font-size:11px;text-transform:uppercase">Saldo disponible</th>
+          </tr></thead>
+          <tbody>
+            ${granosConDatos.sort().map((g, i) => {
+              const gs = statsPorGrano[g];
+              const even = i % 2 === 1;
+              return `<tr style="border-bottom:1px solid var(--bg3);${even?'background:var(--bg2)':''}">
+                <td style="padding:8px 14px">${GTAGmet(g)}</td>
+                <td style="padding:8px 14px;text-align:right;font-family:var(--mono)">${fk(gs.kg_entregado - gs.kg_mermado)}</td>
+                <td style="padding:8px 14px;text-align:right;font-family:var(--mono);color:var(--amber)">${gs.kg_mermado > 0 ? fk(gs.kg_mermado) : '—'}</td>
+                <td style="padding:8px 14px;text-align:right;font-family:var(--mono);color:var(--blue)">${gs.kg_liquidado > 0 ? fk(gs.kg_liquidado) : '—'}</td>
+                <td style="padding:8px 14px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${fk(gs.kg_disponible)}</td>
+              </tr>`;
+            }).join('')}
+            <tr style="background:var(--bg3);border-top:2px solid var(--border)">
+              <td style="padding:8px 14px;font-weight:700;font-size:11px;text-transform:uppercase;color:var(--text3)">TOTAL</td>
+              <td style="padding:8px 14px;text-align:right;font-family:var(--mono);font-weight:700">${fk(s.kg_entregado - s.kg_mermado)}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--amber)">${s.kg_mermado > 0 ? fk(s.kg_mermado) : '—'}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--blue)">${s.kg_liquidado > 0 ? fk(s.kg_liquidado) : '—'}</td>
+              <td style="padding:8px 14px;text-align:right;font-family:var(--mono);font-weight:700;color:var(--green)">${fk(s.kg_disponible)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>`;
+  }
 
   // Filtrar movimientos por campaña
   const todosMovs = [...a.movimientos].sort((a,b)=>a.fecha.localeCompare(b.fecha));
