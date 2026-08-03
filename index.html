@@ -7737,6 +7737,14 @@ function abrirEditarBolson(bolsonId) {
   document.getElementById('edit-bolson-egresado').value        = b.egresado   || 0;
   document.getElementById('edit-bolson-alert').innerHTML       = '';
 
+  // Guardar el % egresado/ingresado ACTUAL del bolsón, para poder mantenerlo
+  // proporcionalmente si el usuario corrige los kilos ingresados.
+  const pctOriginal = (b.ingresado > 0) ? (b.egresado || 0) / b.ingresado : 0;
+  document.getElementById('edit-bolson-pct-original').value = pctOriginal;
+  document.getElementById('edit-bolson-mantener-pct').checked = true;
+  const pctLabel = document.getElementById('edit-bolson-pct-label');
+  if (pctLabel) pctLabel.textContent = `(actualmente ${Math.round(pctOriginal*100)}%)`;
+
   // Poblar y seleccionar ubicación
   const ubSel = document.getElementById('edit-bolson-ubicacion');
   ubSel.innerHTML = '<option value="">— Seleccionar campo —</option>' +
@@ -7744,6 +7752,16 @@ function abrirEditarBolson(bolsonId) {
 
   document.getElementById('edit-bolson-overlay').style.display = 'flex';
   document.body.style.overflow = 'hidden';
+}
+
+function ajustarEgresadoProporcional() {
+  const chk = document.getElementById('edit-bolson-mantener-pct');
+  if (!chk || !chk.checked) return;
+  const pct    = parseFloat(document.getElementById('edit-bolson-pct-original').value) || 0;
+  const ingEl  = document.getElementById('edit-bolson-ingresado');
+  const egrEl  = document.getElementById('edit-bolson-egresado');
+  const newIng = parseFloat(ingEl.value) || 0;
+  egrEl.value = Math.round(newIng * pct);
 }
 
 function guardarEdicionBolson() {
@@ -7787,14 +7805,38 @@ function guardarEdicionBolson() {
     }
   }
 
-  // Ajustar movimiento de ingreso asociado si cambiaron los kg
-  if (newIng !== oldIng) {
-    const mov = movimientos.find(m => m.bolsonId === bolsonId && m.tipo === 'ingreso');
-    if (mov) {
-      mov.kg   = newIng;
-      mov.grano= grano;
-      mov.ref  = (mov.ref || '') + ` [ajustado: ${oldIng.toLocaleString('es-AR')} → ${newIng.toLocaleString('es-AR')} kg]`;
+  // Reescalar proporcionalmente TODO lo que compone este bolsón (lotes de
+  // origen, cargas individuales, y los movimientos de ingreso en el historial)
+  // para mantener las mismas proporciones relativas entre ellos.
+  if (newIng !== oldIng && oldIng > 0 && document.getElementById('edit-bolson-mantener-pct')?.checked) {
+    const escala = newIng / oldIng;
+
+    // Composición por lote (b.lotes: [{campo, lote, kilos}])
+    if (b.lotes && b.lotes.length) {
+      b.lotes = b.lotes.map(l => ({ ...l, kilos: Math.round((l.kilos || 0) * escala) }));
     }
+
+    // Cargas individuales (cada una con su propio desglose de lotes)
+    if (b.cargas && b.cargas.length) {
+      b.cargas = b.cargas.map(c => ({
+        ...c,
+        kilos: Math.round((c.kilos || 0) * escala),
+        lotes: (c.lotes || []).map(cl => ({ ...cl, kilos: Math.round((cl.kilos || 0) * escala) }))
+      }));
+    }
+
+    // TODOS los movimientos de ingreso asociados a este bolsón (puede haber
+    // más de uno si tuvo varias cargas) — se escalan igual, no solo el primero.
+    movimientos.filter(m => m.bolsonId === bolsonId && m.tipo === 'ingreso').forEach(m => {
+      m.kg    = Math.round((m.kg || 0) * escala);
+      m.grano = grano;
+    });
+    const movRef = movimientos.find(m => m.bolsonId === bolsonId && m.tipo === 'ingreso');
+    if (movRef) movRef.ref = (movRef.ref || '') + ` [total del bolsón ajustado: ${oldIng.toLocaleString('es-AR')} → ${newIng.toLocaleString('es-AR')} kg]`;
+  } else if (newIng !== oldIng) {
+    // oldIng era 0 (no había nada que escalar) — solo actualizar el movimiento simple
+    const mov = movimientos.find(m => m.bolsonId === bolsonId && m.tipo === 'ingreso');
+    if (mov) { mov.kg = newIng; mov.grano = grano; }
   }
 
   guardarEstado();
@@ -10408,13 +10450,18 @@ setTimeout(() => {
       </div>
 
       <div class="edit-section-title">Kilos ingresados totales</div>
-      <div style="background:var(--amber-bg);border:1px solid #FCD34D;border-radius:var(--radius);padding:9px 12px;margin-bottom:12px;font-size:12px;color:var(--amber)">
+      <div style="background:var(--amber-bg);border:1px solid #FCD34D;border-radius:var(--radius);padding:9px 12px;margin-bottom:10px;font-size:12px;color:var(--amber)">
         ⚠️ Cambiar los kilos ingresados ajusta también el movimiento de ingreso en el historial.
       </div>
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);margin-bottom:12px;cursor:pointer">
+        <input type="checkbox" id="edit-bolson-mantener-pct" checked onchange="ajustarEgresadoProporcional()">
+        Mantener las proporciones entre lotes de origen y el % egresado al cambiar los kilos ingresados <span id="edit-bolson-pct-label" style="color:var(--text3)"></span>
+      </label>
+      <input type="hidden" id="edit-bolson-pct-original" value="0">
       <div class="form-grid">
         <div class="form-group">
           <label>Kilos ingresados</label>
-          <input type="number" id="edit-bolson-ingresado" min="0">
+          <input type="number" id="edit-bolson-ingresado" min="0" oninput="ajustarEgresadoProporcional()">
         </div>
         <div class="form-group">
           <label>Kilos egresados</label>
