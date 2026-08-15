@@ -879,13 +879,18 @@ tr:hover td{background:rgba(0,0,0,0.016)}
     <div id="bolsones" class="section">
       <div class="topbar">
         <div>
-          <div class="page-title">Bolsones activos</div>
-          <div class="page-sub">Stock disponible por bolsón</div>
+          <div class="page-title">Bolsones y tolvas activos</div>
+          <div class="page-sub">Stock disponible por bolsón o tolva</div>
         </div>
+        <select id="filtro-tipo-unidad" onchange="renderBolsones()" style="padding:7px 10px;border:1px solid var(--border2);border-radius:var(--radius);font-size:13px;background:white;color:var(--text)">
+          <option value="">Bolsones y tolvas</option>
+          <option value="bolson">Solo bolsones</option>
+          <option value="tolva">Solo tolvas</option>
+        </select>
       </div>
       <div class="card">
         <table>
-          <thead><tr><th>#</th><th>Ubicación</th><th>Campo</th><th>Inquilino</th><th>Lote</th><th>Grano</th><th>Cosecha</th><th>Ingresado</th><th>Egresado</th><th>Stock</th><th>%</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>Tipo</th><th>Ubicación</th><th>Campo</th><th>Inquilino</th><th>Lote</th><th>Grano</th><th>Cosecha</th><th>Ingresado</th><th>Egresado</th><th>Stock</th><th>%</th><th></th></tr></thead>
           <tbody id="tbody-bolsones"></tbody>
         </table>
       </div>
@@ -911,6 +916,15 @@ tr:hover td{background:rgba(0,0,0,0.016)}
 
           <!-- ══ PANEL: NUEVO BOLSÓN ══════════════════════════════ -->
           <div id="panel-nuevo">
+            <div class="form-group" style="margin-bottom:14px">
+              <label>Tipo de unidad</label>
+              <div style="display:flex;gap:8px;margin-top:4px">
+                <button type="button" id="ing-tipo-btn-bolson" class="btn btn-outline" style="width:auto;padding:9px 20px;font-size:13px;flex:1;border-color:var(--green);background:var(--green);color:#fff;font-weight:600" onclick="seleccionarTipoUnidadIng('bolson')">🌾 Bolsón</button>
+                <button type="button" id="ing-tipo-btn-tolva" class="btn btn-outline" style="width:auto;padding:9px 20px;font-size:13px;flex:1" onclick="seleccionarTipoUnidadIng('tolva')">🚛 Tolva (directo a camión)</button>
+              </div>
+              <input type="hidden" id="ing-tipo" value="bolson">
+              <div style="font-size:11px;color:var(--text3);margin-top:5px">La tolva es para cuando cargás el camión directo durante la trilla, sin pasar por un bolsón — se registra y se descuenta igual, solo que con numeración e identificación propia.</div>
+            </div>
             <div class="form-grid">
               <div class="form-group">
                 <label>Inquilino</label>
@@ -935,7 +949,7 @@ tr:hover td{background:rgba(0,0,0,0.016)}
                 <input type="text" id="ing-cosecha" placeholder="Ej: 25/26" maxlength="10">
               </div>
               <div class="form-group">
-                <label>N° bolsón en campaña <span style="font-size:11px;color:var(--text3);font-weight:400">(opcional — se auto-asigna)</span></label>
+                <label id="ing-num-campaña-label">N° bolsón en campaña <span style="font-size:11px;color:var(--text3);font-weight:400">(opcional — se auto-asigna)</span></label>
                 <input type="number" id="ing-num-campaña" placeholder="Ej: 1" min="1">
               </div>
             </div>
@@ -2780,7 +2794,7 @@ function buscarGlobal(q) {
 
   // Bolsones
   bolsones.forEach(b => {
-    const num = b.numCampaña ? 'B'+b.numCampaña : '#'+b.id;
+    const num = _unidadNumDisplay(b);
     const txt = [num, b.campo, b.inquilino, b.lote, b.grano, b.ubicacion].join(' ').toLowerCase();
     if (txt.includes(q)) {
       const s = (b.ingresado||0)-(b.egresado||0);
@@ -3189,7 +3203,7 @@ function actualizarBolsones() {
     const yaSel = !!_egrBolsones.find(x => x.id === b.id);
     return `<div class="bolson-card ${yaSel ? 'selected' : ''}" id="bc-${b.id}">
       <div class="bolson-left">
-        <div class="bolson-title">Bolsón #${b.id} — ${b.campo} · Lotes ${loteLabel}</div>
+        <div class="bolson-title">${_unidadTipoLabel(b)} #${b.id} — ${b.campo} · Lotes ${loteLabel}</div>
         <div class="bolson-meta">${b.inquilino}${b.cosecha?' · Cosecha '+b.cosecha:''} · ${b.obs||'Sin obs.'}</div>
         <div class="progbar" style="margin-top:6px"><div class="progbar-fill" style="width:${pct}%"></div></div>
       </div>
@@ -3531,7 +3545,7 @@ function actualizarOpcionesBolsonEgr() {
     disponibles.map(b => {
       const stock  = _stockSeguro(b);
       const campoD = _campoDisplay(b);
-      return `<option value="${b.id}">B${b.numCampaña} · ${b.grano} · ${campoD} · ${stock.toLocaleString('es-AR')} kg</option>`;
+      return `<option value="${b.id}">${_unidadNumDisplay(b)} · ${b.grano} · ${campoD} · ${stock.toLocaleString('es-AR')} kg</option>`;
     }).join('');
 }
 
@@ -3552,7 +3566,7 @@ function mostrarBolsonEgresoSeleccionado() {
 
   cont.innerHTML = `<div class="bolson-card ${yaSel ? 'selected' : ''}" style="margin-top:0">
     <div class="bolson-left">
-      <div class="bolson-title">B${b.numCampaña} · Cosecha ${b.cosecha} — ${campoD} · Lotes ${_lotesLabel(b.lotes) || b.lote}</div>
+      <div class="bolson-title">${_unidadNumDisplay(b)} · Cosecha ${b.cosecha} — ${campoD} · Lotes ${_lotesLabel(b.lotes) || b.lote}</div>
       <div class="bolson-meta">${b.inquilino} · <span class="tag ${tc}" style="font-size:10px">${b.grano}</span>${b.obs ? ' · ' + b.obs : ''}</div>
       <div class="progbar" style="margin-top:6px"><div class="progbar-fill" style="width:${pct}%"></div></div>
     </div>
@@ -3614,7 +3628,7 @@ function renderEgrBolsonesSeleccionados() {
     const campoD = _campoDisplay(b);
     return `<div class="bolson-sel-item">
       <div class="bolson-sel-info">
-        <div class="bolson-sel-id">Bolsón #${b.id} <span class="tag ${tc}" style="font-size:10px">${b.grano}</span></div>
+        <div class="bolson-sel-id">${_unidadTipoLabel(b)} #${b.id} <span class="tag ${tc}" style="font-size:10px">${b.grano}</span></div>
         <div class="bolson-sel-meta">${campoD} · Lotes ${_lotesLabel(b.lotes)||b.lote} · disp: ${stock.toLocaleString('es-AR')} kg</div>
       </div>
       <input type="number" placeholder="Kilos" min="1" max="${stock}"
@@ -3630,6 +3644,7 @@ function renderEgrBolsonesSeleccionados() {
 // ─── OPERACIONES ─────────────────────────────────────────────────
 function registrarIngreso() {
   if (typeof _checkPermiso === 'function' && !_checkPermiso('escribir')) return;
+  const tipoUnidad = document.getElementById('ing-tipo')?.value === 'tolva' ? 'tolva' : 'bolson';
   const inquilino = document.getElementById('ing-inquilino').value;
   const grano     = document.getElementById('ing-grano').value;
   const cosecha   = document.getElementById('ing-cosecha').value.trim();
@@ -3654,8 +3669,9 @@ function registrarIngreso() {
   const campoRef   = campos.length === 1 ? campos[0] : 'Varios campos';
   const loteDisplay = _lotesLabel(lotesValidos);
 
-  // Numeración por campaña: usar manual si se ingresó, si no auto-incrementar
-  const campKey = cosecha || 'sin-campaña';
+  // Numeración por campaña — bolsones y tolvas tienen su propia numeración
+  // independiente (B1, B2... por un lado, T1, T2... por otro) aunque compartan cosecha.
+  const campKey = (cosecha || 'sin-campaña') + (tipoUnidad === 'tolva' ? '__tolva' : '');
   if (!nextBolsonPorCampania[campKey]) nextBolsonPorCampania[campKey] = 1;
   const numManual = parseInt(document.getElementById('ing-num-campaña').value);
   let numEnCampaña;
@@ -3671,7 +3687,7 @@ function registrarIngreso() {
 
   const primeraCarga = { fecha, kilos: totalKilos, obs, lotes: [...lotesValidos], fotos: [..._fotosReg._ingFotos] };
   const b = {
-    id: nextBolson++, numCampaña: numEnCampaña, inquilino,
+    id: nextBolson++, numCampaña: numEnCampaña, tipo: tipoUnidad, inquilino,
     campo: campoRef, lote: loteDisplay, lotes: [...lotesValidos],
     grano, ingresado: totalKilos, egresado: 0, obs, cosecha, fecha,
     ubicacion: ubicacion || campoRef,
@@ -3692,7 +3708,8 @@ function registrarIngreso() {
     }
   })();
   guardarEstado();
-  alertEl.innerHTML = `<div class="alert alert-success">✅ Bolsón #${b.id} creado: ${totalKilos.toLocaleString('es-AR')} kg de ${grano} — ${campoRef} Lotes ${loteDisplay} (${inquilino})${cosecha ? ' · Cosecha ' + cosecha : ''}</div>`;
+  const etiquetaUnidad = tipoUnidad === 'tolva' ? 'Tolva' : 'Bolsón';
+  alertEl.innerHTML = `<div class="alert alert-success">✅ ${etiquetaUnidad} ${_unidadNumDisplay(b)} creado${tipoUnidad==='tolva'?'a':''}: ${totalKilos.toLocaleString('es-AR')} kg de ${grano} — ${campoRef} Lotes ${loteDisplay} (${inquilino})${cosecha ? ' · Cosecha ' + cosecha : ''}</div>`;
 
   ['ing-inquilino','ing-grano','ing-obs','ing-cosecha'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('ing-fecha').value = '';
@@ -3703,7 +3720,29 @@ function registrarIngreso() {
   document.getElementById('ing-total-bar').style.display = 'none';
   _fotosReg._ingFotos = [];
   _ingLotes = [];
+  seleccionarTipoUnidadIng('bolson'); // volver al modo default para la próxima carga
   renderDashboard(); renderBolsones();
+}
+
+// Alterna entre crear un "Bolsón" o una "Tolva" (carga directa a camión durante la trilla)
+function seleccionarTipoUnidadIng(tipo) {
+  const hidden = document.getElementById('ing-tipo');
+  if (hidden) hidden.value = tipo;
+  const btnB = document.getElementById('ing-tipo-btn-bolson');
+  const btnT = document.getElementById('ing-tipo-btn-tolva');
+  const activo   = 'border-color:var(--green);background:var(--green);color:#fff;font-weight:600';
+  const inactivo = '';
+  if (btnB) btnB.style.cssText = 'width:auto;padding:9px 20px;font-size:13px;flex:1;' + (tipo==='bolson' ? activo : inactivo);
+  if (btnT) btnT.style.cssText = 'width:auto;padding:9px 20px;font-size:13px;flex:1;' + (tipo==='tolva'  ? activo : inactivo);
+  const label = document.getElementById('ing-num-campaña-label');
+  if (label) label.innerHTML = (tipo==='tolva' ? 'N° tolva en campaña' : 'N° bolsón en campaña') + ' <span style="font-size:11px;color:var(--text3);font-weight:400">(opcional — se auto-asigna)</span>';
+}
+
+// Etiqueta de tipo ("Bolsón" / "Tolva") y numeración con el prefijo correspondiente (B1 / T1)
+function _unidadTipoLabel(b) { return (b && b.tipo === 'tolva') ? 'Tolva' : 'Bolsón'; }
+function _unidadNumDisplay(b) {
+  const prefix = (b && b.tipo === 'tolva') ? 'T' : 'B';
+  return (b && b.numCampaña) ? prefix + b.numCampaña : '#' + (b ? b.id : '');
 }
 
 // ─── NUEVO: MODOS INGRESO ────────────────────────────────────────
@@ -3769,7 +3808,7 @@ function renderBolsonBuscado(b) {
   const pct = b.ingresado > 0 ? Math.round((s / b.ingresado) * 100) : 0;
   return `<div class="bolson-card" id="bc-add-${b.id}" onclick="seleccionarBolsonParaCarga(${b.id})" style="margin-bottom:8px">
     <div class="bolson-left">
-      <div class="bolson-title">Bolsón #${b.id} — Lote ${b.lote} · ${b.campo}</div>
+      <div class="bolson-title">${_unidadTipoLabel(b)} #${b.id} — Lote ${b.lote} · ${b.campo}</div>
       <div class="bolson-meta">${b.inquilino}${b.cosecha?' · Cosecha '+b.cosecha:''} · ${b.obs||'Sin observaciones'}</div>
       <div class="progbar" style="margin-top:6px"><div class="progbar-fill" style="width:${pct}%"></div></div>
     </div>
@@ -3790,7 +3829,7 @@ function seleccionarBolsonParaCarga(id) {
   if (!b) return;
   const s = b.ingresado - b.egresado;
   document.getElementById('carga-bolson-info').innerHTML =
-    `<strong>Bolsón #${b.id}</strong> · <strong>${b.grano}</strong> · ${b.campo} Lote ${b.lote} · ${b.inquilino}` +
+    `<strong>${_unidadTipoLabel(b)} #${b.id}</strong> · <strong>${b.grano}</strong> · ${b.campo} Lote ${b.lote} · ${b.inquilino}` +
     `<br><span style="font-size:12px;color:var(--text3)">Stock actual: <strong style="color:var(--green)">${s.toLocaleString('es-AR')} kg</strong> · Cosecha: ${b.cosecha||'—'} · ${b.obs||''}</span>`;
   document.getElementById('carga-fecha').value = new Date().toISOString().split('T')[0];
   document.getElementById('carga-obs').value   = '';
@@ -3892,7 +3931,7 @@ function agregarKilosExistente() {
   movimientos.push({
     movId: nextMovId++, fecha, tipo: 'ingreso', inquilino: b.inquilino, campo: b.campo,
     lote: loteDisplay, grano: b.grano, kg: kilos,
-    ref: `Carga parcial · Bolsón #${b.id} · Lotes ${loteDisplay}${obs ? ' — ' + obs : ''}`,
+    ref: `Carga parcial · ${_unidadTipoLabel(b)} #${b.id} · Lotes ${loteDisplay}${obs ? ' — ' + obs : ''}`,
     bolsonId: b.id
   });
 
@@ -3905,7 +3944,7 @@ function agregarKilosExistente() {
     }
   })();
   guardarEstado();
-  alertEl.innerHTML = `<div class="alert alert-success">✅ Se agregaron ${kilos.toLocaleString('es-AR')} kg al Bolsón #${b.id} (Lotes ${loteDisplay}). Total: ${b.ingresado.toLocaleString('es-AR')} kg</div>`;
+  alertEl.innerHTML = `<div class="alert alert-success">✅ Se agregaron ${kilos.toLocaleString('es-AR')} kg al ${_unidadTipoLabel(b)} #${b.id} (Lotes ${loteDisplay}). Total: ${b.ingresado.toLocaleString('es-AR')} kg</div>`;
 
   _fotosReg._cargaFotos = []; _bolsonParaCarga = null; _cargaLotes = [];
   document.getElementById('carga-fotos-preview').innerHTML = '';
@@ -3924,7 +3963,7 @@ function verCargasDetalle(bolsonId) {
   const b = bolsones.find(x => x.id === bolsonId);
   if (!b) return;
 
-  document.getElementById('cargas-modal-titulo').textContent = `Bolsón #${b.id} — ${b.grano} · ${_campoDisplay(b)}`;
+  document.getElementById('cargas-modal-titulo').textContent = `${_unidadTipoLabel(b)} #${b.id} — ${b.grano} · ${_campoDisplay(b)}`;
   const resumen = _camposResumenHTML(b);
   document.getElementById('cargas-modal-sub').innerHTML =
     `${b.inquilino}${b.cosecha?' · Cosecha '+b.cosecha:''} · Total ingresado: <strong>${b.ingresado.toLocaleString('es-AR')} kg</strong>` +
@@ -4110,7 +4149,7 @@ function editFiltrarBolsones() {
       return `<div class="bolson-card ${sel ? 'selected' : ''}" id="edit-bc-${b.id}"
         onclick="seleccionarBolsonEditEgr(${b.id})" style="margin-bottom:8px">
         <div class="bolson-left">
-          <div class="bolson-title">Bolsón #${b.id} — Lote ${b.lote} · ${b.campo}${b.id===oldBid?' <span style=\'font-size:10px;color:var(--amber)\'>● actual</span>':''}</div>
+          <div class="bolson-title">${_unidadTipoLabel(b)} #${b.id} — Lote ${b.lote} · ${b.campo}${b.id===oldBid?' <span style=\'font-size:10px;color:var(--amber)\'>● actual</span>':''}</div>
           <div class="bolson-meta">${b.inquilino}${b.cosecha?' · Cosecha '+b.cosecha:''}</div>
           <div class="progbar" style="margin-top:6px"><div class="progbar-fill" style="width:${Math.min(100,pct)}%"></div></div>
         </div>
@@ -4417,7 +4456,7 @@ function registrarEgreso() {
       // Stock no calculable — permitir el egreso con advertencia
       console.warn('Stock no calculable para bolsón', b.id, '— permitiendo egreso');
     } else if (item.kg > stock + 1) { // +1 para tolerancia de redondeo
-      alertEl.innerHTML = `<div class="alert alert-danger">Stock insuficiente en Bolsón #${b.id}. Disponible: ${Math.max(0,stock).toLocaleString('es-AR')} kg, intentás egresar: ${item.kg.toLocaleString('es-AR')} kg.</div>`; return;
+      alertEl.innerHTML = `<div class="alert alert-danger">Stock insuficiente en ${_unidadTipoLabel(b)} #${b.id}. Disponible: ${Math.max(0,stock).toLocaleString('es-AR')} kg, intentás egresar: ${item.kg.toLocaleString('es-AR')} kg.</div>`; return;
     }
   }
 
@@ -4538,18 +4577,27 @@ function renderDashboard() {
 
 function renderBolsones() {
   const tbody = document.getElementById('tbody-bolsones');
-  if (!bolsones.length) { tbody.innerHTML = '<tr><td colspan="12"><div class="empty-state">No hay bolsones registrados aún</div></td></tr>'; return; }
+  const filtroTipo = document.getElementById('filtro-tipo-unidad')?.value || '';
+  const lista = filtroTipo
+    ? bolsones.filter(b => (b.tipo === 'tolva' ? 'tolva' : 'bolson') === filtroTipo)
+    : bolsones;
+  if (!lista.length) { tbody.innerHTML = `<tr><td colspan="13"><div class="empty-state">${bolsones.length ? 'Sin resultados para ese filtro' : 'No hay bolsones ni tolvas registrados aún'}</div></td></tr>`; return; }
 
-  tbody.innerHTML = bolsones.map(b => {
+  tbody.innerHTML = lista.map(b => {
     const s   = b.ingresado - b.egresado;
     const pct = b.ingresado > 0 ? Math.round((s / b.ingresado) * 100) : 0;
     const tc  = 'tag-' + b.grano.toLowerCase().replace('í','i').replace('ó','o');
     const nCargas = b.cargas ? b.cargas.length : (b.ingresado > 0 ? 1 : 0);
     const nFotos  = b.cargas ? b.cargas.reduce((a,c) => a + (c.fotos ? c.fotos.length : 0), 0) : 0;
-    const numDisplay  = b.numCampaña ? `B${b.numCampaña}` : `#${b.id}`;
+    const numDisplay  = _unidadNumDisplay(b);
+    const esTolva = b.tipo === 'tolva';
+    const tipoBadge = esTolva
+      ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:#FFEDD5;color:#C2410C;text-transform:uppercase;letter-spacing:.03em">🚛 Tolva</span>`
+      : `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--green-bg);color:var(--green);text-transform:uppercase;letter-spacing:.03em">🌾 Bolsón</span>`;
     const ubicDisplay = b.ubicacion || '—';
     return `<tr>
       <td class="num" style="color:var(--text3)">${numDisplay}</td>
+      <td>${tipoBadge}</td>
       <td><span class="badge-campo" style="background:#E0F2FE;color:#0369A1">${ubicDisplay}</span></td>
       <td><span class="badge-campo">${_campoDisplay(b)}</span></td>
       <td><span class="badge-inq">${b.inquilino}</span></td>
@@ -7716,7 +7764,7 @@ function confirmarEliminarBolson(bolsonId) {
   if (!b) return;
   const cel = document.getElementById('accs-bolson-' + bolsonId);
   if (!cel) return;
-  const num = b.numCampaña ? `B${b.numCampaña}` : `#${b.id}`;
+  const num = _unidadNumDisplay(b);
   cel.innerHTML = `
     <div class="confirm-inline" style="flex-wrap:wrap;gap:4px">
       <span style="font-size:11px;color:var(--red);font-weight:500">¿Eliminar ${num}?</span>
@@ -7745,7 +7793,7 @@ function eliminarBolson(bolsonId) {
   guardarEstado();
   renderBolsones();
   renderDashboard();
-  const num = b.numCampaña ? `B${b.numCampaña}` : `#${b.id}`;
+  const num = _unidadNumDisplay(b);
   mostrarToast(`🗑️ Bolsón ${num} eliminado${movEliminados ? ' y ' + movEliminados + ' movimiento(s) asociados' : ''}`);
 }
 
@@ -7755,7 +7803,7 @@ function abrirEditarBolson(bolsonId) {
 
   document.getElementById('edit-bolson-id').value = bolsonId;
   document.getElementById('edit-bolson-subtitulo').textContent =
-    `${b.numCampaña ? 'B' + b.numCampaña : '#' + b.id} · ${b.grano} · ${_campoDisplay(b)} · Cosecha ${b.cosecha||'—'}`;
+    `${_unidadNumDisplay(b)} (${_unidadTipoLabel(b)}) · ${b.grano} · ${_campoDisplay(b)} · Cosecha ${b.cosecha||'—'}`;
 
   document.getElementById('edit-bolson-inquilino').value       = b.inquilino  || '';
   document.getElementById('edit-bolson-grano').value           = b.grano      || 'Soja';
