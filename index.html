@@ -4548,7 +4548,8 @@ function renderDashboard() {
     <div class="metric-card"><div class="metric-label">Stock total</div><div class="metric-value">${total.toLocaleString('es-AR')}</div><div class="metric-unit">kilogramos</div></div>
     <div class="metric-card"><div class="metric-label">Bolsones activos</div><div class="metric-value">${bolsones.filter(b=>b.ingresado-b.egresado>0).length}</div><div class="metric-unit">con stock disponible</div></div>
     <div class="metric-card"><div class="metric-label">Movimientos</div><div class="metric-value">${movimientos.length}</div><div class="metric-unit">registrados</div></div>
-    <div class="metric-card"><div class="metric-label">Soja disponible</div><div class="metric-value">${tot.soja.toLocaleString('es-AR')}</div><div class="metric-unit">kilogramos</div></div>`;
+    <div class="metric-card"><div class="metric-label">Soja disponible</div><div class="metric-value">${tot.soja.toLocaleString('es-AR')}</div><div class="metric-unit">kilogramos</div></div>
+    <div class="metric-card"><div class="metric-label">Maíz disponible</div><div class="metric-value">${tot.maiz.toLocaleString('es-AR')}</div><div class="metric-unit">kilogramos</div></div>`;
   // Stock por ubicación (campo físico del bolsón)
   const porUbic = {};
   bolsones.forEach(b => {
