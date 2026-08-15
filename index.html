@@ -1307,6 +1307,12 @@ tr:hover td{background:rgba(0,0,0,0.016)}
           <div id="det-campania-pills" style="display:flex;gap:6px;flex-wrap:wrap"></div>
         </div>
 
+        <!-- Filtro grano -->
+        <div id="det-grano-filter-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <span style="font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Grano:</span>
+          <div id="det-grano-pills" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        </div>
+
         <div class="metrics-grid" id="det-metricas" style="margin-bottom:16px"></div>
 
         <!-- Tabla cuenta corriente -->
@@ -5299,6 +5305,7 @@ function obtenerOCrearAcopio(nombre, cuit, entidad) {
 }
 
 let _detCampaniaActual = null; // null = todas las campañas
+let _detGranoActual = null; // null = todos los granos
 
 function getCampaniasAcopio(clave) {
   const a = acopios[clave];
@@ -6457,6 +6464,7 @@ function renderAcopios() {
 function verDetalleAcopio(clave) {
   acopioActual = clave;
   _detCampaniaActual = null; // reset filtro al abrir
+  _detGranoActual = null;
   document.getElementById('acopio-lista-view').style.display = 'none';
   document.getElementById('acopio-detalle-view').style.display = 'block';
   document.getElementById('acopio-page-sub').textContent = acopios[clave].nombre;
@@ -6482,6 +6490,11 @@ function volverListaAcopios() {
 
 function seleccionarCampaniaDetalle(clave, campania) {
   _detCampaniaActual = campania;
+  renderDetalleAcopio(clave);
+}
+
+function seleccionarGranoDetalle(clave, grano) {
+  _detGranoActual = grano;
   renderDetalleAcopio(clave);
 }
 
@@ -6516,11 +6529,36 @@ function renderDetalleAcopio(clave) {
   document.getElementById('det-cuit').textContent = a.cuit ? 'CUIT: ' + a.cuit : '';
 
   const fk = n => n.toLocaleString('es-AR');
-  const labelCamp = campFiltro ? ` · ${campFiltro}` : '';
   const granosConDatos = Object.keys(statsPorGrano);
   const GTAGmet = g => `<span class="tag tag-${(g||'').toLowerCase().replace('í','i').replace('ó','o')}" style="font-size:11px">${g}</span>`;
 
-  if (granosConDatos.length <= 1) {
+  // Render pills de grano — si el grano filtrado ya no tiene datos (por cambio de campaña), se resetea
+  const granoFiltro = (_detGranoActual && granosConDatos.includes(_detGranoActual)) ? _detGranoActual : null;
+  if (_detGranoActual && !granoFiltro) _detGranoActual = null;
+  const pillsGranoEl = document.getElementById('det-grano-pills');
+  if (pillsGranoEl) {
+    const pillStyleG = (active) => `padding:4px 14px;border-radius:20px;font-size:12px;font-weight:600;cursor:pointer;border:1.5px solid ${active ? 'var(--green)' : 'var(--border2)'};background:${active ? 'var(--green)' : 'var(--surface)'};color:${active ? '#fff' : 'var(--text2)'};font-family:var(--sans);transition:all .15s`;
+    let pillsGranoHtml = `<button style="${pillStyleG(!granoFiltro)}" onclick="seleccionarGranoDetalle('${clave}', null)">Todos</button>`;
+    granosConDatos.sort().forEach(g => {
+      pillsGranoHtml += `<button style="${pillStyleG(granoFiltro === g)}" onclick="seleccionarGranoDetalle('${clave}', '${g}')">${g}</button>`;
+    });
+    pillsGranoEl.innerHTML = pillsGranoHtml;
+  }
+  const filterWrapGrano = document.getElementById('det-grano-filter-wrap');
+  if (filterWrapGrano) filterWrapGrano.style.display = granosConDatos.length > 1 ? 'flex' : 'none';
+
+  const labelCamp  = campFiltro ? ` · ${campFiltro}` : '';
+  const labelGrano = granoFiltro ? ` · ${granoFiltro}` : '';
+
+  if (granoFiltro) {
+    // Un grano puntual seleccionado por el filtro — mostrar sus 4 tarjetas
+    const gs = statsPorGrano[granoFiltro] || { kg_entregado:0, kg_mermado:0, kg_liquidado:0, kg_disponible:0 };
+    document.getElementById('det-metricas').innerHTML = `
+      <div class="metric-card"><div class="metric-label">Entregado${labelCamp}${labelGrano}</div><div class="metric-value">${fk(gs.kg_entregado - gs.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
+      <div class="metric-card"><div class="metric-label">Mermas${labelCamp}${labelGrano}</div><div class="metric-value" style="color:var(--amber)">${fk(gs.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
+      <div class="metric-card"><div class="metric-label">Liquidado${labelCamp}${labelGrano}</div><div class="metric-value" style="color:var(--blue)">${fk(gs.kg_liquidado)}</div><div class="metric-unit">kilogramos</div></div>
+      <div class="metric-card"><div class="metric-label">Saldo disponible${labelCamp}${labelGrano}</div><div class="metric-value" style="color:var(--green)">${fk(gs.kg_disponible)}</div><div class="metric-unit">kg sin liquidar</div></div>`;
+  } else if (granosConDatos.length <= 1) {
     // Un solo grano (o ninguno) — no hace falta desglosar, mostramos las 4 tarjetas como siempre
     document.getElementById('det-metricas').innerHTML = `
       <div class="metric-card"><div class="metric-label">Total entregado${labelCamp}</div><div class="metric-value">${fk(s.kg_entregado - s.kg_mermado)}</div><div class="metric-unit">kilogramos</div></div>
@@ -6566,9 +6604,10 @@ function renderDetalleAcopio(clave) {
 
   // Filtrar movimientos por campaña
   const todosMovs = [...a.movimientos].sort((a,b)=>a.fecha.localeCompare(b.fecha));
-  const movs = campFiltro
+  let movs = campFiltro
     ? todosMovs.filter(m => !m.campania || m.campania === campFiltro)
     : todosMovs;
+  if (granoFiltro) movs = movs.filter(m => (m.grano || 'Sin especificar') === granoFiltro);
   let saldo = 0;
   const PILL = { entrega:'pill-entrega', merma:'pill-merma', liquidacion:'pill-liquidacion' };
   const LABEL= { entrega:'ENTREGA', merma:'MERMA', liquidacion:'LIQUIDACIÓN' };
@@ -6615,7 +6654,7 @@ function renderDetalleAcopio(clave) {
   }
 
   // Resumen financiero completo
-  const liqMovs = a.movimientos.filter(m => m.tipo === 'liquidacion' && (!campFiltro || !m.campania || m.campania === campFiltro));
+  const liqMovs = a.movimientos.filter(m => m.tipo === 'liquidacion' && (!campFiltro || !m.campania || m.campania === campFiltro) && (!granoFiltro || (m.grano || 'Sin especificar') === granoFiltro));
   const finEl   = document.getElementById('det-financiero');
   if (liqMovs.length) {
     const sum  = key => liqMovs.reduce((acc, m) => acc + (m[key] || 0), 0);
@@ -6698,7 +6737,7 @@ function renderDetalleAcopio(clave) {
   } else { finEl.style.display = 'none'; }
 
   // ── Resumen financiero de CERTIFICACIONES ────────────────────────
-  const certMovs   = a.movimientos.filter(m => m.tipo === 'merma' && (m.total_servicios > 0 || m.kg_bruto > 0));
+  const certMovs   = a.movimientos.filter(m => m.tipo === 'merma' && (m.total_servicios > 0 || m.kg_bruto > 0) && (!granoFiltro || (m.grano || 'Sin especificar') === granoFiltro));
   console.log('[RenderDetalleAcopio] clave:', clave, '| nombre:', a.nombre, '| certMovs encontrados:', certMovs.length, '| COEs:', certMovs.map(m=>m.coe));
   const certFinEl  = document.getElementById('det-financiero-cert');
   if (certMovs.length) {
