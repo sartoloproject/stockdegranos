@@ -1000,7 +1000,7 @@ tr:hover td{background:rgba(0,0,0,0.016)}
 
             <!-- BÚSQUEDA -->
             <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:16px">
-              <div class="section-label" style="margin-bottom:10px">Buscar bolsón</div>
+              <div class="section-label" style="margin-bottom:10px">Buscar bolsón o tolva</div>
               <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
                 <button class="btn btn-outline busq-tab active" id="btab-id" onclick="switchBusqueda('id')">Por N° bolsón</button>
                 <button class="btn btn-outline busq-tab" id="btab-ubicacion" onclick="switchBusqueda('ubicacion')">Por ubicación</button>
@@ -1010,7 +1010,7 @@ tr:hover td{background:rgba(0,0,0,0.016)}
               <!-- Buscar por ID -->
               <div id="busq-id-panel">
                 <div class="form-group" style="max-width:200px">
-                  <label>N° de bolsón</label>
+                  <label>N° de bolsón o tolva</label>
                   <input type="number" id="busq-id-input" placeholder="Ej: 5" min="1"
                     oninput="buscarBolsonPorId(this.value)">
                 </div>
@@ -3762,14 +3762,40 @@ function switchModoIngreso(mode, btn) {
 function switchBusqueda(mode) {
   document.querySelectorAll('.busq-tab').forEach(t => t.classList.remove('active'));
   document.getElementById('btab-' + mode).classList.add('active');
-  document.getElementById('busq-id-panel').style.display     = mode === 'id'     ? 'block' : 'none';
-  document.getElementById('busq-filtro-panel').style.display = mode === 'filtro' ? 'block' : 'none';
+  document.getElementById('busq-id-panel').style.display        = mode === 'id'        ? 'block' : 'none';
+  document.getElementById('busq-ubicacion-panel').style.display = mode === 'ubicacion' ? 'block' : 'none';
+  document.getElementById('busq-filtro-panel').style.display    = mode === 'filtro'    ? 'block' : 'none';
   document.getElementById('busq-resultados').innerHTML = '';
   document.getElementById('carga-parcial-form').style.display = 'none';
   _bolsonParaCarga = null;
+
+  if (mode === 'ubicacion') {
+    const sel = document.getElementById('badd-ubicacion');
+    if (sel && sel.options.length <= 1) {
+      sel.innerHTML = '<option value="">— Todos los campos —</option>' +
+        Object.keys(CAMPOS_DATA).map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+  }
 }
 
 // ─── BÚSQUEDA DE BOLSONES ─────────────────────────────────────────
+function buscarBolsonPorUbicacion() {
+  const ubicacion = document.getElementById('badd-ubicacion').value;
+  const grano     = document.getElementById('badd-ubicacion-grano').value;
+  const cont      = document.getElementById('busq-resultados');
+  const lista = bolsones.filter(b =>
+    (!ubicacion || (b.ubicacion || b.campo || '—') === ubicacion) &&
+    (!grano     || b.grano === grano) &&
+    _stockSeguro(b) > 0
+  );
+  if (!lista.length) {
+    cont.innerHTML = '<div class="no-bolsones">Sin bolsones ni tolvas disponibles para esa combinación</div>';
+    document.getElementById('carga-parcial-form').style.display = 'none';
+    return;
+  }
+  cont.innerHTML = '<div class="section-label" style="margin-bottom:8px">Seleccioná el bolsón o tolva</div>' +
+    lista.map(b => renderBolsonBuscado(b)).join('');
+}
 function buscarBolsonPorId(val) {
   const id = parseInt(val);
   const cont = document.getElementById('busq-resultados');
