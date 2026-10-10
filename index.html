@@ -4498,59 +4498,104 @@ function registrarEgreso() {
     ? `Bolsón #${bolsonIds[0]}`
     : 'Bolsones #' + bolsonIds.join(', #');
 
-  // Descontar stock de cada bolsón — inicializar egresado si no existe
-  bolsonesConKg.forEach(item => {
-    const b = bolsones.find(x => x.id === item.id);
-    if (!b) return;
-    if (typeof b.ingresado !== 'number') {
-      // Recalcular ingresado desde movimientos para bolsones de año anterior
-      b.ingresado = movimientos.filter(m => m.bolsonId === b.id && m.tipo === 'ingreso').reduce((s,m) => s + (m.kg||0), 0);
-    }
-    if (typeof b.egresado !== 'number') b.egresado = 0;
-    b.egresado += item.kg;
-  });
-
-  const fechaFinal = fecha || new Date().toISOString().split('T')[0];
-  movimientos.push({
-    movId: nextMovId++,
-    fecha: fechaFinal, tipo: 'egreso',
-    inquilino, campo, lote: lote || grano, grano, kg: totalKg,
-    ref: `CPE ${nro||'s/n'} | ${bolsonRef} | ${dominios} → ${destino}`,
-    bolsonId: bolsonIds[0],       // primer bolsón para compatibilidad
-    bolsonIds: bolsonesConKg,     // detalle [{id, kg}]
-    nro_cpe: nro||'', chofer, dominios, destino
-  });
-
-  // Vincular al acopio — detectar entidad del Titular de la CPE
-  if (ultimaCPE && ultimaCPE.rte_comercial) {
-    const entidadCPE = _entidadDesdeTitular(ultimaCPE.titular_cuit || '') || 'JAVIER';
-    const clave = obtenerOCrearAcopio(ultimaCPE.rte_comercial, ultimaCPE.rte_comercial_cuit || '', entidadCPE);
-    acopios[clave].movimientos.push({
-      tipo:'entrega', fecha: fechaFinal,
-      nro_cpe: nro||ultimaCPE.nro_cpe||'',
-      grano, campania: ultimaCPE.campania||'',
-      kg: totalKg,
-      dominios: dominios||ultimaCPE.dominios||'',
-      chofer: chofer||ultimaCPE.chofer||'',
-      campo, lote: lote||''
-    });
+  // Evitar duplicados: una misma CPE no debería registrarse dos veces
+  if (nro && movimientos.some(m => m.tipo === 'egreso' && m.nro_cpe === nro)) {
+    alertEl.innerHTML = `<div class="alert alert-danger">La CPE ${nro} ya está registrada como egreso. Si hay que corregirla, editala desde Movimientos.</div>`;
+    return;
   }
 
-  // Vincular al chofer
-  if (ultimaCPE && (ultimaCPE.chofer || ultimaCPE.dominios)) {
-    const nomChofer = chofer||ultimaCPE.chofer||'';
-    const domChofer = dominios||ultimaCPE.dominios||'';
-    if (nomChofer || domChofer) {
-      const claveC = obtenerOCrearChofer(nomChofer, domChofer);
-      choferes[claveC].viajes.push({
-        fecha: fechaFinal,
+  const fechaFinal = fecha || new Date().toISOString().split('T')[0];
+
+  // El registro es "todo o nada": cada cambio apunta su propio "deshacer".
+  // Si algo falla a mitad de camino, se revierte todo y no queda nada a medias
+  // (antes se descontaba el stock y se agregaba el movimiento en memoria, pero
+  // nunca se llegaba a guardar — y al reintentar se descontaba otra vez).
+  const undo = [];
+  const nextMovIdPrevio = nextMovId;
+  try {
+    // 1) Descontar stock de cada bolsón — inicializar egresado si no existe
+    bolsonesConKg.forEach(item => {
+      const b = bolsones.find(x => x.id === item.id);
+      if (!b) return;
+      const ingPrev = b.ingresado, egrPrev = b.egresado;
+      undo.push(() => { b.ingresado = ingPrev; b.egresado = egrPrev; });
+      if (typeof b.ingresado !== 'number') {
+        // Recalcular ingresado desde movimientos para bolsones de año anterior
+        b.ingresado = movimientos.filter(m => m.bolsonId === b.id && m.tipo === 'ingreso').reduce((s,m) => s + (m.kg||0), 0);
+      }
+      if (typeof b.egresado !== 'number') b.egresado = 0;
+      b.egresado += item.kg;
+    });
+
+    // 2) Movimiento global de egreso
+    const movEgreso = {
+      movId: nextMovId++,
+      fecha: fechaFinal, tipo: 'egreso',
+      inquilino, campo, lote: lote || grano, grano, kg: totalKg,
+      ref: `CPE ${nro||'s/n'} | ${bolsonRef} | ${dominios} → ${destino}`,
+      bolsonId: bolsonIds[0],       // primer bolsón para compatibilidad
+      bolsonIds: bolsonesConKg,     // detalle [{id, kg}]
+      nro_cpe: nro||'', chofer, dominios, destino
+    };
+    movimientos.push(movEgreso);
+    undo.push(() => {
+      const i = movimientos.indexOf(movEgreso);
+      if (i >= 0) movimientos.splice(i, 1);
+      nextMovId = nextMovIdPrevio;
+    });
+
+    // 3) Vincular al acopio — detectar entidad del Titular de la CPE
+    if (ultimaCPE && ultimaCPE.rte_comercial) {
+      const entidadCPE = _entidadDesdeTitular(ultimaCPE.titular_cuit || '') || 'JAVIER';
+      const clave = obtenerOCrearAcopio(ultimaCPE.rte_comercial, ultimaCPE.rte_comercial_cuit || '', entidadCPE);
+      const cuenta = acopios[clave];
+      // Firebase no guarda listas vacías: una cuenta sin movimientos vuelve sin el campo
+      if (!Array.isArray(cuenta.movimientos)) cuenta.movimientos = [];
+      const entrega = {
+        tipo:'entrega', fecha: fechaFinal,
         nro_cpe: nro||ultimaCPE.nro_cpe||'',
-        campo, lote: lote||'', grano, kg: totalKg,
-        destino: destino||ultimaCPE.destino||'',
-        flete: 0
+        grano, campania: ultimaCPE.campania||'',
+        kg: totalKg,
+        dominios: dominios||ultimaCPE.dominios||'',
+        chofer: chofer||ultimaCPE.chofer||'',
+        campo, lote: lote||''
+      };
+      cuenta.movimientos.push(entrega);
+      undo.push(() => {
+        const i = cuenta.movimientos.indexOf(entrega);
+        if (i >= 0) cuenta.movimientos.splice(i, 1);
       });
-      recalcularViajesChofer(claveC);
     }
+
+    // 4) Vincular al chofer
+    if (ultimaCPE && (ultimaCPE.chofer || ultimaCPE.dominios)) {
+      const nomChofer = chofer||ultimaCPE.chofer||'';
+      const domChofer = dominios||ultimaCPE.dominios||'';
+      if (nomChofer || domChofer) {
+        const claveC = obtenerOCrearChofer(nomChofer, domChofer);
+        const ch = choferes[claveC];
+        if (!Array.isArray(ch.viajes)) ch.viajes = [];
+        const viaje = {
+          fecha: fechaFinal,
+          nro_cpe: nro||ultimaCPE.nro_cpe||'',
+          campo, lote: lote||'', grano, kg: totalKg,
+          destino: destino||ultimaCPE.destino||'',
+          flete: 0
+        };
+        ch.viajes.push(viaje);
+        undo.push(() => {
+          const i = ch.viajes.indexOf(viaje);
+          if (i >= 0) ch.viajes.splice(i, 1);
+        });
+        recalcularViajesChofer(claveC);
+      }
+    }
+  } catch (err) {
+    console.error('[Egreso] Falló el registro — se revierten todos los cambios:', err);
+    undo.reverse().forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
+    alertEl.innerHTML = `<div class="alert alert-danger">No se pudo registrar el egreso (${err.message}). No se modificó ningún dato: podés volver a intentarlo.</div>`;
+    renderEgrBolsonesSeleccionados();
+    return;
   }
 
   ultimaCPE = null;
@@ -5172,7 +5217,36 @@ function _cargarDesdeLocal() {
   } catch(e) { console.warn('No se pudo restaurar desde localStorage:', e); }
 }
 
+// Firebase Realtime Database NO guarda listas ni objetos vacíos: al volver a leer
+// los datos, un campo vacío simplemente "no existe" (undefined). Muchas funciones
+// asumen que esas listas existen (ej: acopios[x].movimientos.push), así que las
+// reponemos apenas se cargan los datos. Se invoca desde deduplicarAcopios(),
+// que ya se ejecuta en todas las rutas de carga (nube, local y cambio de campaña).
+function _normalizarEstadoCargado() {
+  Object.values(acopios || {}).forEach(a => {
+    if (a && !Array.isArray(a.movimientos)) a.movimientos = [];
+  });
+  Object.values(choferes || {}).forEach(ch => {
+    if (!ch) return;
+    if (!Array.isArray(ch.viajes))     ch.viajes     = [];
+    if (!Array.isArray(ch.descuentos)) ch.descuentos = [];
+  });
+  Object.values(camiones || {}).forEach(cam => {
+    if (!cam) return;
+    if (!cam.meses  || typeof cam.meses  !== 'object') cam.meses  = {};
+    if (!cam.config || typeof cam.config !== 'object') cam.config = {};
+  });
+  if (!cisterna || typeof cisterna !== 'object') cisterna = {};
+  ['lotes','movimientos','equipos_cosecha','equipos_flete_extra'].forEach(k => {
+    if (!Array.isArray(cisterna[k])) cisterna[k] = [];
+  });
+  (bolsones || []).forEach(b => {
+    if (b && b.cargas && !Array.isArray(b.cargas)) b.cargas = Object.values(b.cargas);
+  });
+}
+
 function deduplicarAcopios() {
+  _normalizarEstadoCargado();
   // ── Primero: migrar claves viejas ────────────────────────────
   let _migChanged = false;
   Object.keys(acopios).slice().forEach(k => {
@@ -5317,7 +5391,7 @@ function obtenerOCrearAcopio(nombre, cuit, entidad) {
         nombre: acopios[claveDuplicada].nombre,
         cuit: cuit || acopios[claveDuplicada].cuit || '',
         entidad,
-        movimientos: [...acopios[claveDuplicada].movimientos]
+        movimientos: [...(acopios[claveDuplicada].movimientos || [])]
       };
       delete acopios[claveDuplicada];
     } else {
@@ -5328,6 +5402,9 @@ function obtenerOCrearAcopio(nombre, cuit, entidad) {
     if (cuit && !acopios[claveNueva].cuit) acopios[claveNueva].cuit = cuit;
     // No sobreescribir entidad existente
   }
+  // Firebase no guarda listas vacías: una cuenta sin movimientos vuelve sin el campo.
+  // Garantizamos siempre que exista, para que cualquier .push / .find posterior funcione.
+  if (!Array.isArray(acopios[claveNueva].movimientos)) acopios[claveNueva].movimientos = [];
   return claveNueva;
 }
 
